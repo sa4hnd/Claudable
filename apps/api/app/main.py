@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.api.projects import router as projects_router
+from app.api.projects.sandbox_crud import router as sandbox_projects_router
 from app.api.repo import router as repo_router
 from app.api.commits import router as commits_router
 from app.api.env import router as env_router
@@ -55,6 +56,7 @@ app.add_middleware(
 
 # Routers
 app.include_router(projects_router, prefix="/api/projects")
+app.include_router(sandbox_projects_router, prefix="/api/projects")
 app.include_router(repo_router)
 app.include_router(commits_router)
 app.include_router(env_router)

@@ -12,7 +12,8 @@ from app.core.websocket.manager import manager as ws_manager
 from app.models.messages import Message
 
 from .base import CLIType
-from .adapters import ClaudeCodeCLI, CursorAgentCLI, CodexCLI, QwenCLI, GeminiCLI
+from .adapters import CursorAgentCLI, CodexCLI, QwenCLI, GeminiCLI
+from .adapters.claude_code_sandbox import ClaudeCodeSandboxCLI
 
 
 class UnifiedCLIManager:
@@ -32,14 +33,36 @@ class UnifiedCLIManager:
         self.conversation_id = conversation_id
         self.db = db
 
+        # Check if project is using sandbox mode
+        self.use_sandbox = self._should_use_sandbox()
+        
         # Initialize CLI adapters with database session
-        self.cli_adapters = {
-            CLIType.CLAUDE: ClaudeCodeCLI(),  # Use SDK implementation if available
-            CLIType.CURSOR: CursorAgentCLI(db_session=db),
-            CLIType.CODEX: CodexCLI(db_session=db),
-            CLIType.QWEN: QwenCLI(db_session=db),
-            CLIType.GEMINI: GeminiCLI(db_session=db),
-        }
+        if self.use_sandbox:
+            self.cli_adapters = {
+                CLIType.CLAUDE: ClaudeCodeSandboxCLI(),  # Use sandbox implementation
+                # Other CLIs not yet supported in sandbox mode
+            }
+        else:
+            # For non-sandbox mode, use sandbox adapter as fallback
+            # since we're migrating to VibeKit sandboxes
+            self.cli_adapters = {
+                CLIType.CLAUDE: ClaudeCodeSandboxCLI(),  # Use sandbox implementation
+                CLIType.CURSOR: CursorAgentCLI(db_session=db),
+                CLIType.CODEX: CodexCLI(db_session=db),
+                CLIType.QWEN: QwenCLI(db_session=db),
+                CLIType.GEMINI: GeminiCLI(db_session=db),
+            }
+
+    def _should_use_sandbox(self) -> bool:
+        """Check if project should use sandbox mode"""
+        try:
+            from app.models.projects import Project as ProjectModel
+            project = self.db.query(ProjectModel).filter(ProjectModel.id == self.project_id).first()
+            if project and project.sandbox_id:
+                return True
+            return False
+        except Exception:
+            return False
 
     async def execute_instruction(
         self,

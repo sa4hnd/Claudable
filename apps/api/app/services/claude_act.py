@@ -4,11 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from claude_code_sdk import query, ClaudeCodeOptions
-from claude_code_sdk.types import (
-    Message, UserMessage, AssistantMessage, SystemMessage, ResultMessage,
-    ContentBlock, TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock
-)
+# Note: claude_code_sdk imports removed - now using VibeKit sandbox integration
 
 
 DEFAULT_MODEL = os.getenv("CLAUDE_CODE_MODEL", "claude-sonnet-4-20250514")
@@ -141,24 +137,25 @@ async def generate_diff_with_logging(
     system_prompt: str = None
 ) -> Tuple[str, str, Optional[str]]:
     """
-    Generate diff with real-time logging via callback function.
+    Generate diff with real-time logging via VibeKit sandbox.
     
     Args:
         instruction: Task description
         allow_globs: List of allowed file patterns
-        repo_path: Repository path
+        repo_path: Repository path (project ID for sandbox)
         log_callback: Async function to call with log data
-        resume_session_id: Optional Claude Code session ID to resume
+        resume_session_id: Optional session ID to resume
         system_prompt: Custom system prompt (defaults to get_system_prompt())
     
     Returns:
         Tuple of (commit_message, changes_summary, session_id)
     """
-    # Claude Code SDK can work without API key in local mode
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("Note: Running Claude Code SDK in local mode (no API key)")
+    from app.services.vibekit_service import VibeKitService
     
-    # Build a simple, direct prompt  
+    # Use provided system prompt or default (dynamically loaded)
+    effective_system_prompt = system_prompt if system_prompt is not None else get_system_prompt()
+    
+    # Build a comprehensive prompt for VibeKit
     user_prompt = (
         f"Task: {instruction}\n\n"
         "Please implement the requested changes to this Next.js project. "
@@ -167,128 +164,83 @@ async def generate_diff_with_logging(
         "<SUMMARY>Brief description of changes made</SUMMARY>"
     )
     
-    # Use provided system prompt or default (dynamically loaded)
-    effective_system_prompt = system_prompt if system_prompt is not None else get_system_prompt()
+    # Initialize VibeKit service
+    vibekit_service = VibeKitService()
     
-    # Setup Claude Code options with session resumption
-    options = ClaudeCodeOptions(
-        cwd=repo_path,
-        allowed_tools=["Read", "Write", "Edit", "MultiEdit", "Bash", "Glob", "Grep", "LS"],
-        permission_mode='acceptEdits',
-        system_prompt=effective_system_prompt,
-        model=DEFAULT_MODEL,  # Use Claude 4 Sonnet model
-        resume=resume_session_id  # Resume existing session if provided
-    )
+    # Extract project ID from repo_path (assuming it's the project ID)
+    project_id = os.path.basename(repo_path)
     
     response_text = ""
-    messages_received = []
-    pending_tools = {}  # Track tool use/result pairs
-    current_session_id = None  # Track the current Claude Code session ID
+    current_session_id = resume_session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     start_time = datetime.now()
     
     try:
-        print(f"Starting Claude Code SDK query with prompt: {user_prompt[:100]}...")
-        message_count = 0
+        print(f"Starting VibeKit sandbox query with prompt: {user_prompt[:100]}...")
         
         # Add immediate debug message to test real-time transmission
         if log_callback:
-            await log_callback("text", {"content": "🚀 Starting Claude Code execution..."})
+            await log_callback("text", {"content": "🚀 Starting VibeKit sandbox execution..."})
         
-        async for message in query(prompt=user_prompt, options=options):
-            messages_received.append(message)
-            message_count += 1
-            print(f"Received message #{message_count} type: {type(message).__name__}")
+        # Initialize sandbox if needed
+        sandbox_id = await vibekit_service.initialize_sandbox(project_id)
+        if log_callback:
+            await log_callback("text", {"content": f"📦 Sandbox initialized: {sandbox_id}"})
+        
+        # Generate code using VibeKit
+        result = await vibekit_service.generate_code(
+            project_id=project_id,
+            prompt=user_prompt,
+            mode="ask"
+        )
+        
+        if result and result.get("success"):
+            response_text = result.get("content", "")
             
-            # Skip internal debug messages to avoid cluttering the UI
+            # Stream the response text
+            if log_callback and response_text:
+                await log_callback("text", {"content": response_text})
             
-            # Log different message types
-            if isinstance(message, SystemMessage):
-                # Skip system init messages - they're not useful for users
-                if message.subtype == "init":
-                    continue
-                    
-            elif isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text += block.text
-                        if log_callback:
-                            await log_callback("text", {"content": block.text})
-                            
-                    elif isinstance(block, ThinkingBlock):
-                        if log_callback:
-                            await log_callback("thinking", {
-                                "content": block.thinking[:200] + "..." if len(block.thinking) > 200 else block.thinking
-                            })
-                            
-                    elif isinstance(block, ToolUseBlock):
-                        pending_tools[block.id] = {
-                            "name": block.name,
-                            "input": block.input,
-                            "summary": extract_tool_summary(block.name, block.input)
-                        }
-                        if log_callback:
-                            await log_callback("tool_start", {
-                                "tool_id": block.id,
-                                "tool_name": block.name,
-                                "summary": pending_tools[block.id]["summary"],
-                                "input": block.input
-                            })
-                            
-                    elif isinstance(block, ToolResultBlock):
-                        tool_info = pending_tools.get(block.tool_use_id, {})
-                        if log_callback:
-                            # For Edit operations, try to extract diff-like information
-                            diff_info = None
-                            if tool_info.get("name") in ["Edit", "MultiEdit"] and block.content:
-                                try:
-                                    content_str = str(block.content)
-                                    if "updated" in content_str.lower() or "modified" in content_str.lower():
-                                        diff_info = content_str
-                                except:
-                                    pass
-                            
-                            await log_callback("tool_result", {
-                                "tool_id": block.tool_use_id,
-                                "tool_name": tool_info.get("name", "unknown"),
-                                "summary": tool_info.get("summary", "Tool completed"),
-                                "is_error": block.is_error or False,
-                                "content": str(block.content)[:500] if block.content else None,
-                                "diff_info": diff_info
-                            })
-                        
-                        # Clean up pending tools
-                        pending_tools.pop(block.tool_use_id, None)
-                        
-            elif isinstance(message, ResultMessage):
-                # Extract session ID from ResultMessage
-                if hasattr(message, 'session_id') and message.session_id:
-                    current_session_id = message.session_id
-                    print(f"Extracted Claude Code session ID: {current_session_id}")
+            # Simulate tool usage for compatibility
+            if log_callback:
+                await log_callback("tool_start", {
+                    "tool_id": "vibekit_generation",
+                    "tool_name": "VibeKit Code Generation",
+                    "summary": "Generating code using VibeKit sandbox",
+                    "input": {"prompt": user_prompt}
+                })
                 
-                duration_ms = (datetime.now() - start_time).total_seconds() * 1000
-                if log_callback:
-                    await log_callback("result", {
-                        "duration_ms": int(duration_ms),
-                        "api_duration_ms": message.duration_api_ms,
-                        "turns": message.num_turns,
-                        "total_cost_usd": message.total_cost_usd,
-                        "is_error": message.is_error,
-                        "session_id": current_session_id
-                    })
+                await log_callback("tool_result", {
+                    "tool_id": "vibekit_generation",
+                    "tool_name": "VibeKit Code Generation",
+                    "summary": "Code generation completed",
+                    "is_error": False,
+                    "content": response_text[:500] if response_text else None
+                })
+        
+        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+        if log_callback:
+            await log_callback("result", {
+                "duration_ms": int(duration_ms),
+                "api_duration_ms": int(duration_ms),
+                "turns": 1,
+                "total_cost_usd": 0.0,  # VibeKit handles cost internally
+                "is_error": not (result and result.get("success")),
+                "session_id": current_session_id
+            })
                     
     except Exception as exc:
-        print(f"Claude Code SDK exception: {type(exc).__name__}: {exc}")
+        print(f"VibeKit sandbox exception: {type(exc).__name__}: {exc}")
         if log_callback:
             await log_callback("error", {"message": str(exc)})
-        raise RuntimeError(f"Claude Code SDK execution failed: {exc}") from exc
+        raise RuntimeError(f"VibeKit sandbox execution failed: {exc}") from exc
     
-    print(f"Claude Code SDK completed. Received {message_count} messages.")
+    print(f"VibeKit sandbox completed.")
     
-    # If no messages were received, Claude Code SDK might not be working properly
-    if message_count == 0:
-        print("No messages received from Claude Code SDK - falling back to simple response")
-        response_text = f"I understand you want to: {instruction}\n\nHowever, Claude Code SDK is not fully configured. Please check if Claude Code CLI is installed or set up your ANTHROPIC_API_KEY."
+    # If no response was received, provide fallback
+    if not response_text:
+        print("No response received from VibeKit sandbox - falling back to simple response")
+        response_text = f"I understand you want to: {instruction}\n\nHowever, VibeKit sandbox is not fully configured. Please check your E2B_API_KEY and ANTHROPIC_API_KEY."
     
     # Extract commit message and summary
     commit_msg = ""
@@ -298,7 +250,7 @@ async def generate_diff_with_logging(
     if not commit_msg:
         commit_msg = instruction.strip()[:72]
     
-    diff_summary = "Changes applied directly via Claude Code SDK"
+    diff_summary = "Changes applied via VibeKit sandbox"
     if "<SUMMARY>" in response_text and "</SUMMARY>" in response_text:
         diff_summary = response_text.split("<SUMMARY>", 1)[1].split("</SUMMARY>", 1)[0].strip()
     

@@ -1,7 +1,7 @@
 import subprocess
 import asyncio
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.cli.unified_manager import CursorAgentCLI
@@ -26,8 +26,8 @@ CLI_OPTIONS = [
 class CLIStatusResponse(BaseModel):
     cli_id: str
     installed: bool
-    version: str | None = None
-    error: str | None = None
+    version: Optional[str] = None
+    error: Optional[str] = None
 
 
 async def check_cli_installation(cli_id: str, command: list) -> CLIStatusResponse:
