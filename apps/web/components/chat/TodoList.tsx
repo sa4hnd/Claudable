@@ -61,7 +61,7 @@ const TodoList: React.FC<TodoListProps> = ({ todos, isUpdate = false }) => {
             <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
           </svg>
         </div>
-        <h3 className="text-white font-bold text-sm">
+        <h3 className="text-gray-900 dark:text-white font-bold text-sm">
           {isUpdate ? 'Updating todo list' : 'Creating todo list'}
         </h3>
       </div>
@@ -69,10 +69,10 @@ const TodoList: React.FC<TodoListProps> = ({ todos, isUpdate = false }) => {
       {/* Todo Items */}
       <div className="space-y-1 ml-8">
         {todos.map((todo) => (
-          <div key={todo.id} className="bg-gray-800/80 rounded-lg p-1.5 flex items-start gap-2">
+          <div key={todo.id} className="bg-gray-100 dark:bg-gray-800/80 rounded-lg p-1.5 flex items-start gap-2">
             {getStatusIcon(todo.status)}
             <div className="flex-1 min-w-0">
-              <div className={`text-white text-xs leading-relaxed ${todo.status === 'completed' ? 'line-through opacity-60' : ''}`}>
+              <div className={`text-gray-900 dark:text-white text-xs leading-relaxed ${todo.status === 'completed' ? 'line-through opacity-60' : ''}`}>
                 {todo.content}
               </div>
             </div>

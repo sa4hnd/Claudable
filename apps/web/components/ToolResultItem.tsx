@@ -77,10 +77,10 @@ const ToolResultItem: React.FC<ToolResultItemProps> = ({ action, filePath, conte
         
         {/* Action and file path */}
         <div className="flex items-center gap-2">
-          <span className="text-white font-bold text-sm">
+          <span className="text-gray-900 dark:text-white font-bold text-sm">
             {action}
           </span>
-          <span className="bg-gray-700 rounded-md px-2 py-0.5 text-xs font-mono text-gray-300">
+          <span className="bg-gray-200 dark:bg-gray-700 rounded-md px-2 py-0.5 text-xs font-mono text-gray-700 dark:text-gray-300">
             {getRelativePath(filePath)}
           </span>
         </div>
