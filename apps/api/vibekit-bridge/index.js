@@ -13,9 +13,9 @@ const PORT = process.env.VIBEKIT_BRIDGE_PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// VibeKit configuration - Hardcoded API keys for immediate testing
+// VibeKit configuration
 const e2bProvider = createE2BProvider({
-  apiKey: process.env.E2B_API_KEY || "e2b_e5e94cb0efba03f188e6d8f047ab962d4dbf1761",
+  apiKey: process.env.E2B_API_KEY,
   templateId: "vibekit-claude" // Use pre-built template
 });
 
@@ -63,25 +63,25 @@ app.post('/api/sandbox/initialize', async (req, res) => {
     
     // Set environment variables for current session
     await vibeKit.executeCommand("unset ANTHROPIC_API_KEY"); // Remove old API key
-    await vibeKit.executeCommand("export ANTHROPIC_AUTH_TOKEN='sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS'");
-    await vibeKit.executeCommand("export ANTHROPIC_BASE_URL='https://pmpjfbhq.cn-nb1.rainapp.top'");
-    await vibeKit.executeCommand("export ANTHROPIC_API_KEY='sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS'"); // Set both for compatibility
+    await vibeKit.executeCommand(`export ANTHROPIC_AUTH_TOKEN='${process.env.ANTHROPIC_API_KEY}'`);
+    await vibeKit.executeCommand(`export ANTHROPIC_BASE_URL='${process.env.ANTHROPIC_BASE_URL}'`);
+    await vibeKit.executeCommand(`export ANTHROPIC_API_KEY='${process.env.ANTHROPIC_API_KEY}'`); // Set both for compatibility
     
     // Add to all shell profiles for persistence using echo -e with proper quoting
     await vibeKit.executeCommand("echo -e '\\n# Claude Code API Configuration' >> ~/.bash_profile");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_AUTH_TOKEN=\"sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS\"' >> ~/.bash_profile");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_API_KEY=\"sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS\"' >> ~/.bash_profile");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_BASE_URL=\"https://pmpjfbhq.cn-nb1.rainapp.top\"' >> ~/.bash_profile");
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_AUTH_TOKEN=\"${process.env.ANTHROPIC_API_KEY}\"' >> ~/.bash_profile`);
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_API_KEY=\"${process.env.ANTHROPIC_API_KEY}\"' >> ~/.bash_profile`);
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_BASE_URL=\"${process.env.ANTHROPIC_BASE_URL}\"' >> ~/.bash_profile`);
     
     await vibeKit.executeCommand("echo -e '\\n# Claude Code API Configuration' >> ~/.bashrc");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_AUTH_TOKEN=\"sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS\"' >> ~/.bashrc");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_API_KEY=\"sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS\"' >> ~/.bashrc");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_BASE_URL=\"https://pmpjfbhq.cn-nb1.rainapp.top\"' >> ~/.bashrc");
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_AUTH_TOKEN=\"${process.env.ANTHROPIC_API_KEY}\"' >> ~/.bashrc`);
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_API_KEY=\"${process.env.ANTHROPIC_API_KEY}\"' >> ~/.bashrc`);
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_BASE_URL=\"${process.env.ANTHROPIC_BASE_URL}\"' >> ~/.bashrc`);
     
     await vibeKit.executeCommand("echo -e '\\n# Claude Code API Configuration' >> ~/.zshrc");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_AUTH_TOKEN=\"sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS\"' >> ~/.zshrc");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_API_KEY=\"sk-KLMMJZWkmhWJbzyBIHdrgUR9RFxGB1Pz8mdwc1geteckiXxS\"' >> ~/.zshrc");
-    await vibeKit.executeCommand("echo -e '\\nexport ANTHROPIC_BASE_URL=\"https://pmpjfbhq.cn-nb1.rainapp.top\"' >> ~/.zshrc");
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_AUTH_TOKEN=\"${process.env.ANTHROPIC_API_KEY}\"' >> ~/.zshrc`);
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_API_KEY=\"${process.env.ANTHROPIC_API_KEY}\"' >> ~/.zshrc`);
+    await vibeKit.executeCommand(`echo -e '\\nexport ANTHROPIC_BASE_URL=\"${process.env.ANTHROPIC_BASE_URL}\"' >> ~/.zshrc`);
     
     // Verify configuration with detailed debugging
     console.log(`[VibeKit] Verifying API configuration...`);
@@ -381,9 +381,136 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
 
     console.log(`[VibeKit] Executing command: ${command}`);
     
-    // Add timeout for long-running commands like create-next-app and npm install
-    const timeout = command.includes('create-next-app') ? 300000 : 
-                   command.includes('npm install') ? 600000 : 60000; // 10 minutes for npm install, 5 minutes for create-next-app, 1 minute for others
+    // Special handling for create-next-app: start in background, return after 3 seconds, complete in background
+    if (command.includes('create-next-app')) {
+      console.log(`[VibeKit] Detected create-next-app command - starting in background with dev server`);
+      
+      // Initialize completion tracking
+      sandbox.createNextAppCompleted = false;
+      sandbox.createNextAppResult = null;
+      
+      // Extract the project directory name from the command
+      const projectDirMatch = command.match(/my-app-[a-f0-9]+/);
+      const projectDir = projectDirMatch ? projectDirMatch[0] : 'my-app';
+      const fullProjectPath = `/vibe0/${projectDir}`;
+      
+      // Chain create-next-app with npm run dev
+      const chainedCommand = `${command} && cd ${projectDir} && npm run dev -- --port 3000`;
+      console.log(`[VibeKit] Chained command: ${chainedCommand}`);
+      
+      // Start the chained command in background
+      const startBackgroundProcess = async () => {
+        try {
+          console.log(`[VibeKit] Starting create-next-app + dev server process...`);
+          const result = await vibeKit.executeCommand(chainedCommand, options);
+          console.log(`[VibeKit] create-next-app + dev server ACTUALLY completed:`, result);
+          sandbox.createNextAppCompleted = true;
+          sandbox.createNextAppResult = result;
+        } catch (error) {
+          console.error(`[VibeKit] create-next-app + dev server failed:`, error);
+          sandbox.createNextAppCompleted = true;
+          sandbox.createNextAppResult = { success: false, error: error.message };
+        }
+      };
+      
+      // Start the background process (don't await it)
+      startBackgroundProcess();
+      
+      // Wait for 3 seconds to let the project structure be created
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Return success after 3 seconds so Claude Code can start coding
+      res.json({
+        success: true,
+        output: 'Next.js project creation started with dev server. Claude Code can now begin coding while setup completes in background.',
+        stderr: '',
+        exitCode: 0,
+        sandboxId: sandbox.sandboxId,
+        background: true,
+        message: 'Project creation + dev server starting - you can start coding now!'
+      });
+      
+      return;
+    }
+    
+    // Special handling for commands that need the project directory to exist
+    if (command.includes('my-app-') && (command.includes('cd /vibe0/my-app-') || command.includes('&& cd my-app-'))) {
+      console.log(`[VibeKit] Detected command that needs project directory - checking if it exists`);
+      
+      // Extract project directory from command
+      const projectDirMatch = command.match(/my-app-[a-f0-9]+/);
+      if (projectDirMatch) {
+        const projectDir = projectDirMatch[0];
+        const fullProjectPath = `/vibe0/${projectDir}`;
+        
+        // Check if directory exists, if not wait for it
+        const checkDirectory = async () => {
+          let attempts = 0;
+          const maxAttempts = 30; // 1 minute max wait (30 * 2 seconds)
+          
+          while (attempts < maxAttempts) {
+            try {
+              const checkResult = await vibeKit.executeCommand(`ls -la ${fullProjectPath}`, { ...options, background: false });
+              if (checkResult.exitCode === 0) {
+                console.log(`[VibeKit] Project directory ${fullProjectPath} exists, proceeding with command`);
+                return true;
+              }
+            } catch (error) {
+              // Directory doesn't exist yet, continue waiting
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            attempts++;
+            console.log(`[VibeKit] Waiting for project directory... attempt ${attempts}/${maxAttempts}`);
+          }
+          
+          console.error(`[VibeKit] Project directory ${fullProjectPath} not found after ${maxAttempts} attempts`);
+          return false;
+        };
+        
+        const directoryExists = await checkDirectory();
+        if (!directoryExists) {
+          return res.status(500).json({
+            success: false,
+            error: `Project directory ${fullProjectPath} not found`,
+            sandboxId: sandbox.sandboxId
+          });
+        }
+      }
+    }
+    
+    // Note: npm run dev is now handled automatically as part of create-next-app command
+    
+    // Special handling for npm install: start in background and return early
+    if (command.includes('npm install')) {
+      console.log(`[VibeKit] Detected npm install command - starting in background`);
+      
+      // Start the command in background
+      const backgroundPromise = vibeKit.executeCommand(command, { ...options, background: true });
+      
+      // Return success immediately
+      res.json({
+        success: true,
+        output: 'Dependencies installation started in background. You can continue coding while packages install.',
+        stderr: '',
+        exitCode: 0,
+        sandboxId: sandbox.sandboxId,
+        background: true,
+        message: 'Dependencies installing in background - you can continue coding!'
+      });
+      
+      // Continue the background process
+      backgroundPromise.then(result => {
+        console.log(`[VibeKit] Background npm install completed:`, result);
+      }).catch(error => {
+        console.error(`[VibeKit] Background npm install failed:`, error);
+      });
+      
+      return;
+    }
+    
+    // For other commands, use normal timeout handling
+    const timeout = 60000; // 1 minute for other commands
     
     const result = await Promise.race([
       vibeKit.executeCommand(command, options),
