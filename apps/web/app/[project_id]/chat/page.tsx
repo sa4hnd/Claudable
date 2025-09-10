@@ -4,7 +4,7 @@ import { AnimatePresence } from 'framer-motion';
 import { MotionDiv, MotionH3, MotionP, MotionButton } from '../../../lib/motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { FaCode, FaDesktop, FaMobileAlt, FaPlay, FaStop, FaSync, FaCog, FaRocket, FaFolder, FaFolderOpen, FaFile, FaFileCode, FaCss3Alt, FaHtml5, FaJs, FaReact, FaPython, FaDocker, FaGitAlt, FaMarkdown, FaDatabase, FaPhp, FaJava, FaRust, FaVuejs, FaLock, FaHome, FaChevronUp, FaChevronRight, FaChevronDown, FaArrowLeft, FaArrowRight, FaRedo } from 'react-icons/fa';
+import { FaCode, FaDesktop, FaMobileAlt, FaPlay, FaStop, FaSync, FaCog, FaRocket, FaFolder, FaFolderOpen, FaFile, FaFileCode, FaCss3Alt, FaHtml5, FaJs, FaReact, FaPython, FaDocker, FaGitAlt, FaMarkdown, FaDatabase, FaPhp, FaJava, FaRust, FaVuejs, FaLock, FaHome, FaChevronUp, FaChevronRight, FaChevronDown, FaArrowLeft, FaArrowRight, FaRedo, FaExternalLinkAlt } from 'react-icons/fa';
 import { SiTypescript, SiGo, SiRuby, SiSvelte, SiJson, SiYaml, SiCplusplus } from 'react-icons/si';
 import { VscJson } from 'react-icons/vsc';
 import ChatLog from '../../../components/ChatLog';
@@ -411,7 +411,13 @@ export default function ChatPage({ params }: Params) {
       
       setPreviewInitializationMessage('Preview ready!');
       setTimeout(() => {
-        setPreviewUrl(data.url);
+        // Force add https:// protocol if missing
+        let finalUrl = data.url;
+        if (finalUrl && !finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+          finalUrl = `https://${finalUrl}`;
+        }
+        
+        setPreviewUrl(finalUrl);
         setIsStartingPreview(false);
         setCurrentRoute('/'); // Reset to root route when starting
       }, 1000);
@@ -1211,6 +1217,11 @@ export default function ChatPage({ params }: Params) {
     // Task 완료 시 - preview 서버 자동 시작
     if (previousActiveState.current && !hasActiveRequests && !previewUrl) {
       console.log('✅ Task completed, auto-starting preview server');
+      console.log('🔍 Auto-start conditions:', {
+        previousActiveState: previousActiveState.current,
+        hasActiveRequests,
+        previewUrl
+      });
       start();
     }
     
@@ -1455,6 +1466,13 @@ export default function ChatPage({ params }: Params) {
                   setIsRunning(isRunningValue);
                   // Agent 작업 완료 상태 추적 및 자동 preview 시작
                   if (!isRunningValue && hasInitialPrompt && !agentWorkComplete && !previewUrl) {
+                    console.log('✅ Agent work completed, auto-starting preview server');
+                    console.log('🔍 Agent auto-start conditions:', {
+                      isRunningValue,
+                      hasInitialPrompt,
+                      agentWorkComplete,
+                      previewUrl
+                    });
                     setAgentWorkComplete(true);
                     // Save to localStorage
                     localStorage.setItem(`project_${projectId}_taskComplete`, 'true');
@@ -1590,6 +1608,15 @@ export default function ChatPage({ params }: Params) {
                           >
                             <FaMobileAlt size={14} />
                           </button>
+                          {previewUrl && (
+                            <button
+                              aria-label="Open in new tab"
+                              className="h-7 w-7 flex items-center justify-center rounded transition-colors text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                              onClick={() => window.open(previewUrl, '_blank')}
+                            >
+                              <FaExternalLinkAlt size={14} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1821,7 +1848,7 @@ export default function ChatPage({ params }: Params) {
                         ref={iframeRef}
                         className="w-full h-full border-none bg-white dark:bg-gray-800"
                         src={previewUrl}
-                        onError={() => {
+                        onError={(e) => {
                           // Show error overlay
                           const overlay = document.getElementById('iframe-error-overlay');
                           if (overlay) overlay.style.display = 'flex';

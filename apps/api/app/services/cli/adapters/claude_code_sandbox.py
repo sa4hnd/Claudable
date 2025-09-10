@@ -379,6 +379,37 @@ class ClaudeCodeSandboxCLI(BaseCLI):
                             session_id=session_id,
                             created_at=datetime.utcnow()
                         )
+                elif chunk.get("type") == "todo_list":
+                    # Handle todo list messages - display structured todo list
+                    content = chunk.get("content", "")
+                    tool_name = chunk.get("tool_name", "TodoWrite")
+                    tool_input = chunk.get("tool_input", {})
+                    tool_id = chunk.get("tool_id", "")
+                    
+                    # Determine if this is an update based on tool input or existing todos
+                    is_update = tool_input.get("isUpdate", False) or "update" in str(tool_input).lower()
+                    
+                    ui.info(f"Todo list {'updated' if is_update else 'generated'}: {tool_name}", "Claude Sandbox")
+                    yield Message(
+                        id=str(uuid.uuid4()),
+                        project_id=project_id,
+                        role="assistant",
+                        content=content,
+                        message_type="todo_list",
+                        metadata_json={
+                            "sandbox_id": vibekit.sandbox_id,
+                            "model": cli_model,
+                            "session_id": session_id,
+                            "cli_type": "claude",
+                            "event_type": "todo_update" if is_update else "todo_list",
+                            "isUpdate": is_update,
+                            "tool_name": tool_name,
+                            "tool_input": tool_input,
+                            "tool_id": tool_id
+                        },
+                        session_id=session_id,
+                        created_at=datetime.utcnow()
+                    )
                 elif chunk.get("type") == "code_generation":
                     yield Message(
                         id=str(uuid.uuid4()),

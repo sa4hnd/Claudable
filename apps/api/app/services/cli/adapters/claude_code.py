@@ -142,69 +142,32 @@ node_modules/
                 f"Added project structure info to initial prompt", "Claude SDK"
             )
 
-        # Configure tools based on initial prompt status
-        if is_initial_prompt:
-            # For initial prompts: use disallowed_tools to explicitly block TodoWrite
-            allowed_tools = [
-                "Read",
-                "Write",
-                "Edit",
-                "MultiEdit",
-                "Bash",
-                "Glob",
-                "Grep",
-                "LS",
-                "WebFetch",
-                "WebSearch",
-            ]
-            disallowed_tools = ["TodoWrite"]
+        # Configure tools - TodoWrite is now allowed for all prompts
+        allowed_tools = [
+            "Read",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "Bash",
+            "Glob",
+            "Grep",
+            "LS",
+            "WebFetch",
+            "WebSearch",
+            "TodoWrite",
+        ]
 
-            ui.info(
-                f"TodoWrite tool EXCLUDED via disallowed_tools (is_initial_prompt: {is_initial_prompt})",
-                "Claude SDK",
-            )
-            ui.debug(f"Allowed tools: {allowed_tools}", "Claude SDK")
-            ui.debug(f"Disallowed tools: {disallowed_tools}", "Claude SDK")
+        ui.info(f"All tools enabled including TodoWrite (is_initial_prompt: {is_initial_prompt})", "Claude SDK")
+        ui.debug(f"Allowed tools: {allowed_tools}", "Claude SDK")
 
-            # Configure Claude Code options with disallowed_tools
-            options = ClaudeCodeOptions(
-                system_prompt=system_prompt,
-                allowed_tools=allowed_tools,
-                disallowed_tools=disallowed_tools,
-                permission_mode="bypassPermissions",
-                model=cli_model,
-                continue_conversation=True,
-            )
-        else:
-            # For non-initial prompts: include TodoWrite in allowed tools
-            allowed_tools = [
-                "Read",
-                "Write",
-                "Edit",
-                "MultiEdit",
-                "Bash",
-                "Glob",
-                "Grep",
-                "LS",
-                "WebFetch",
-                "WebSearch",
-                "TodoWrite",
-            ]
-
-            ui.info(
-                f"TodoWrite tool INCLUDED (is_initial_prompt: {is_initial_prompt})",
-                "Claude SDK",
-            )
-            ui.debug(f"Allowed tools: {allowed_tools}", "Claude SDK")
-
-            # Configure Claude Code options without disallowed_tools
-            options = ClaudeCodeOptions(
-                system_prompt=system_prompt,
-                allowed_tools=allowed_tools,
-                permission_mode="bypassPermissions",
-                model=cli_model,
-                continue_conversation=True,
-            )
+        # Configure Claude Code options
+        options = ClaudeCodeOptions(
+            system_prompt=system_prompt,
+            allowed_tools=allowed_tools,
+            permission_mode="bypassPermissions",
+            model=cli_model,
+            continue_conversation=True,
+        )
 
         ui.info(f"Using model: {cli_model}", "Claude SDK")
         ui.debug(f"Project path: {project_path}", "Claude SDK")

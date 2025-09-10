@@ -223,10 +223,10 @@ For the FIRST interaction on a new project:
   - PostCSS: Use standard configuration with tailwindcss and autoprefixer plugins
   - Package versions: Prefer stable releases over beta/alpha versions
   - If creating custom themes, use tailwind.config.ts, not experimental CSS features
-- Error checking sequence (use these BEFORE final build):
+- Error checking sequence (use these for verification):
   1. Run `npx tsc --noEmit` for TypeScript type checking (fastest)
   2. Run `npx next lint` for ESLint errors (fast)
-  3. Only after fixing all errors, run `npm run build` as final verification
+  3. Verify the code compiles without errors
 - Never run "npm run dev" or start servers; the user will handle server processes
 - Never run "npm install". The node_modules are already installed.
 - When encountering npm errors:

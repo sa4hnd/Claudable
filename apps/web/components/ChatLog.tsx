@@ -6,6 +6,8 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { Brain } from 'lucide-react';
 import ToolResultItem from './ToolResultItem';
 import ThinkingSection from './chat/ThinkingSection';
+import TodoList from './chat/TodoList';
+import ProjectSetupProgress from './chat/ProjectSetupProgress';
 
 // Tool Message Component - Enhanced with new design
 const ToolMessage = ({ content, metadata }: { content: unknown; metadata?: { tool_name?: string; summary?: string; description?: string; file_path?: string; [key: string]: unknown } }) => {
@@ -107,7 +109,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8080';
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
-  message_type?: 'chat' | 'tool_result' | 'system' | 'error' | 'info';
+  message_type?: 'chat' | 'tool_result' | 'system' | 'error' | 'info' | 'todo_list';
   content: string;
   metadata_json?: any;
   parent_message_id?: string;
@@ -146,6 +148,25 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
   const [isLoading, setIsLoading] = useState(true);
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
+  
+  // Project setup progress state
+  const [isProjectSetup, setIsProjectSetup] = useState(false);
+  const [currentSetupStep, setCurrentSetupStep] = useState(0);
+  const [setupSteps, setSetupSteps] = useState<Array<{
+    id: string;
+    title: string;
+    icon: string;
+    status: 'pending' | 'in_progress' | 'completed';
+  }>>([
+    { id: 'init', title: 'Initializing sandbox environment', icon: '', status: 'pending' },
+    { id: 'open', title: 'Opening sandbox environment', icon: '', status: 'pending' },
+    { id: 'create', title: 'Creating Next.js project (this might take a while)', icon: '', status: 'pending' },
+    { id: 'git', title: 'Setting up git repository', icon: '', status: 'pending' },
+    { id: 'start', title: 'Starting development server', icon: '', status: 'pending' },
+    { id: 'ready', title: 'Project ready!', icon: '', status: 'pending' },
+  ]);
+  const [setupComplete, setSetupComplete] = useState(false);
+  
   const logsEndRef = useRef<HTMLDivElement>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -166,11 +187,67 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
         created_at: message.created_at || new Date().toISOString()
       };
       
+      
       // Clear waiting state when we receive an assistant message
       if (chatMessage.role === 'assistant') {
         setIsWaitingForResponse(false);
       }
       
+      // Handle project setup progress messages
+      if (chatMessage.message_type === 'info' && chatMessage.content) {
+        const content = chatMessage.content;
+        console.log('🔍 Checking progress message:', { content, message_type: chatMessage.message_type, role: chatMessage.role });
+        
+        // Check if this is a setup progress message (handle both plain text and formatted messages)
+        if (content.includes('Initializing sandbox environment') || content.includes('🌐')) {
+          console.log('🌐 Detected initializing sandbox - setting up progress component');
+          setIsProjectSetup(true);
+          setCurrentSetupStep(0);
+          setSetupSteps(prev => prev.map((step, index) => 
+            index === 0 ? { ...step, status: 'in_progress' } : step
+          ));
+        } else if (content.includes('Opening sandbox environment') || content.includes('🚀')) {
+          setCurrentSetupStep(1);
+          setSetupSteps(prev => prev.map((step, index) => 
+            index === 0 ? { ...step, status: 'completed' } :
+            index === 1 ? { ...step, status: 'in_progress' } : step
+          ));
+        } else if (content.includes('Creating Next.js project') || content.includes('📦')) {
+          setCurrentSetupStep(2);
+          setSetupSteps(prev => prev.map((step, index) => 
+            index === 1 ? { ...step, status: 'completed' } :
+            index === 2 ? { ...step, status: 'in_progress' } : step
+          ));
+        } else if (content.includes('Setting up git repository') || content.includes('🔧') || content.includes('**Setting up git repository**')) {
+          console.log('🔧 Detected setting up git repository');
+          setCurrentSetupStep(3);
+          setSetupSteps(prev => prev.map((step, index) => 
+            index === 2 ? { ...step, status: 'completed' } :
+            index === 3 ? { ...step, status: 'in_progress' } : step
+          ));
+        } else if (content.includes('Starting development server') || content.includes('⚡') || content.includes('**Starting development server**')) {
+          console.log('⚡ Detected starting development server');
+          setCurrentSetupStep(4);
+          setSetupSteps(prev => prev.map((step, index) => 
+            index === 3 ? { ...step, status: 'completed' } :
+            index === 4 ? { ...step, status: 'in_progress' } : step
+          ));
+        } else if (content.includes('Project ready!') || content.includes('✅') || content.includes('**Project ready!**')) {
+          console.log('✅ Detected project ready');
+          setCurrentSetupStep(5);
+          setSetupSteps(prev => prev.map((step, index) => 
+            index === 4 ? { ...step, status: 'completed' } :
+            index === 5 ? { ...step, status: 'completed' } : step
+          ));
+          setSetupComplete(true);
+          // Hide progress after 3 seconds
+          setTimeout(() => {
+            setIsProjectSetup(false);
+          }, 3000);
+        }
+      }
+      
+
       setMessages(prev => {
         const exists = prev.some(msg => msg.id === chatMessage.id);
         if (exists) {
@@ -620,6 +697,27 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
       }
     }
     
+    // Hide project setup progress messages (they're shown in the progress component)
+    if (message.message_type === 'info' && message.content) {
+      const content = message.content;
+      if (content.includes('Initializing sandbox environment') ||
+          content.includes('Opening sandbox environment') ||
+          content.includes('Creating Next.js project') ||
+          content.includes('Setting up git repository') ||
+          content.includes('Starting development server') ||
+          content.includes('Project ready!') ||
+          content.includes('Preview:') ||
+          // Also check for messages with emojis and markdown formatting
+          content.includes('🌐') ||
+          content.includes('🚀') ||
+          content.includes('📦') ||
+          content.includes('🔧') ||
+          content.includes('⚡') ||
+          content.includes('✅')) {
+        return false;
+      }
+    }
+    
     // Hide messages explicitly marked as hidden
     if (message.metadata_json && message.metadata_json.hidden_from_ui) {
       return false;
@@ -802,6 +900,18 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
           </div>
         )}
         
+        {/* Project Setup Progress */}
+        {isProjectSetup && (
+          <>
+            {console.log('🎯 Rendering progress component:', { currentSetupStep, setupSteps, isComplete: setupComplete })}
+            <ProjectSetupProgress 
+              currentStep={currentSetupStep}
+              steps={setupSteps}
+              isComplete={setupComplete}
+            />
+          </>
+        )}
+        
         <AnimatePresence>
           {/* Render chat messages */}
           {messages.filter(shouldDisplayMessage).map((message, index) => {
@@ -927,7 +1037,13 @@ export default function ChatLog({ projectId, onSessionStatusChange, onProjectSta
                 ) : (
                   // Agent message - full width, no box
                   <div className="w-full">
-                    {isToolUsageMessage(message.content, message.metadata_json) ? (
+                    {message.message_type === 'todo_list' ? (
+                      // Todo list - render as structured component
+                      <TodoList 
+                        todos={JSON.parse(message.content)} 
+                        isUpdate={message.metadata_json?.event_type === 'todo_update' || message.metadata_json?.isUpdate}
+                      />
+                    ) : isToolUsageMessage(message.content, message.metadata_json) ? (
                       // Tool usage - clean display with expand functionality
                       <ToolMessage content={message.content} metadata={message.metadata_json} />
                     ) : (

@@ -54,17 +54,26 @@ async def start_preview(
     # Check if this is a VibeKit sandbox project
     if project.sandbox_id and project.sandbox_status == "active":
         try:
-            # Use VibeKit sandbox for preview
-            vibekit = get_vibekit_service(project_id)
-            
-            # Start development server in sandbox
-            dev_result = await vibekit.execute_command(
-                f"cd /vibe0/my-app-{project_id.replace('project-', '')} && npm run dev -- --port 3000",
-                {"background": True}
-            )
-            
-            if dev_result.get("success"):
-                # Get host URL for the sandbox
+            # For VibeKit projects, the preview URL should already be set
+            if project.preview_url:
+                # Ensure the URL has the correct protocol
+                host_url = project.preview_url.strip()
+                if not host_url.startswith(('http://', 'https://')):
+                    host_url = f"https://{host_url}"
+                
+                # Update project status to running
+                project.status = "running"
+                db.commit()
+                
+                return PreviewStatusResponse(
+                    running=True,
+                    port=3000,
+                    url=host_url,
+                    process_id=None
+                )
+            else:
+                # If no preview URL, try to get it from VibeKit
+                vibekit = get_vibekit_service(project_id)
                 host_url = await vibekit.get_host(3000)
                 
                 # Update project with preview info
@@ -73,16 +82,15 @@ async def start_preview(
                 project.status = "running"
                 db.commit()
                 
+                # Ensure the URL has the correct protocol
+                if not host_url.startswith(('http://', 'https://')):
+                    host_url = f"https://{host_url}"
+                
                 return PreviewStatusResponse(
                     running=True,
                     port=3000,
                     url=host_url,
-                    process_id=None  # VibeKit doesn't provide process ID
-                )
-            else:
-                return PreviewStatusResponse(
-                    running=False,
-                    error=f"Failed to start dev server: {dev_result.get('error', 'Unknown error')}"
+                    process_id=None
                 )
                 
         except Exception as e:

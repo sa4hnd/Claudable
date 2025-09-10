@@ -56,6 +56,16 @@ async def initialize_project(project_id: str, name: str, preferred_cli: str = "c
             if project:
                 project.sandbox_id = sandbox_info.get("sandbox_id")
                 project.sandbox_status = "active"
+                
+                # Ensure the URL has the correct protocol before storing
+                host_url = sandbox_info.get("host_url")
+                if host_url:
+                    host_url = host_url.strip()
+                    if not host_url.startswith(('http://', 'https://')):
+                        host_url = f"https://{host_url}"
+                
+                project.host_url = host_url  # Store the host URL
+                project.preview_url = host_url  # Also set as preview URL
                 project.repo_path = f"/vibe0/my-app-{project_id}"  # Project will be created by Claude Code
                 db_session.commit()
             

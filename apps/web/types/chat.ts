@@ -5,7 +5,7 @@
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
-  message_type?: 'chat' | 'error' | 'info' | 'tool_use';
+  message_type?: 'chat' | 'error' | 'info' | 'tool_use' | 'todo_list';
   content: string;
   metadata_json?: Record<string, any>;
   parent_message_id?: string;
