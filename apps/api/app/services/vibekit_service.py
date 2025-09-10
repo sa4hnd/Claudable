@@ -1,28 +1,35 @@
 """
-VibeKit Service
-Handles communication with VibeKit Node.js bridge for sandbox operations
+VibeKit Service for sandbox management
 """
 import asyncio
-import os
-import httpx
 import json
-from typing import Optional, Dict, Any, AsyncGenerator
-from datetime import datetime
+import httpx
+from typing import Dict, Any, Optional, AsyncGenerator
 from app.core.terminal_ui import ui
 
 
 class VibeKitService:
-    """VibeKit service for sandbox operations"""
+    """VibeKit service for managing sandbox operations"""
     
-    def __init__(self, project_id: str = None):
+    def __init__(self, project_id: str):
         self.project_id = project_id
-        self.bridge_url = os.getenv("VIBEKIT_BRIDGE_URL", "http://localhost:3001")
-        self.sandbox_id = None
-        self.session_id = None
-        self.client = httpx.AsyncClient(timeout=600.0)  # 10 minutes for long-running commands
+        self.bridge_url = "http://localhost:3001"
+        self.sandbox_id: Optional[str] = None
+        self.client = httpx.AsyncClient(timeout=300.0)  # 5 minute timeout
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Check VibeKit bridge health"""
+        try:
+            response = await self.client.get(f"{self.bridge_url}/api/health")
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"status": "error", "message": f"HTTP {response.status_code}"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
     
     async def initialize_sandbox(self) -> str:
-        """Initialize E2B sandbox and return sandbox ID"""
+        """Initialize a new sandbox"""
         try:
             ui.info(f"Initializing VibeKit sandbox for project: {self.project_id}", "VibeKit")
             
@@ -33,7 +40,7 @@ class VibeKitService:
             
             if response.status_code == 200:
                 data = response.json()
-                self.sandbox_id = data["sandboxId"]
+                self.sandbox_id = data.get("sandboxId")
                 ui.success(f"Sandbox initialized: {self.sandbox_id}", "VibeKit")
                 return self.sandbox_id
             else:
@@ -67,8 +74,10 @@ class VibeKitService:
                             if line.startswith("data: "):
                                 try:
                                     data = json.loads(line[6:])  # Remove "data: " prefix
+                                    ui.info(f"VibeKit received: {data.get('type', 'unknown')} - {data.get('content', '')[:100]}...", "VibeKit")
                                     yield data
-                                except json.JSONDecodeError:
+                                except json.JSONDecodeError as e:
+                                    ui.warning(f"Failed to parse VibeKit data: {e}", "VibeKit")
                                     continue
                     else:
                         error_text = await response.aread()
@@ -109,19 +118,22 @@ class VibeKitService:
             
             if response.status_code == 200:
                 data = response.json()
-                ui.success(f"Command executed successfully", "VibeKit")
+                if data.get("success"):
+                    ui.success("Command executed successfully", "VibeKit")
+                else:
+                    ui.warning(f"Command failed: {data.get('error', 'Unknown error')}", "VibeKit")
                 return data
             else:
                 error_msg = f"Command execution failed: {response.text}"
                 ui.error(error_msg, "VibeKit")
-                raise Exception(error_msg)
+                return {"success": False, "error": error_msg}
                 
         except Exception as e:
             ui.error(f"Error executing command: {e}", "VibeKit")
-            raise
+            return {"success": False, "error": str(e)}
     
     async def get_host(self, port: int) -> str:
-        """Get host URL for sandbox port"""
+        """Get host URL for a port"""
         try:
             ui.info(f"Getting host URL for port: {port}", "VibeKit")
             
@@ -131,20 +143,18 @@ class VibeKitService:
             
             if response.status_code == 200:
                 data = response.json()
-                host_url = data["hostUrl"]
+                host_url = data.get("hostUrl")
                 ui.success(f"Host URL: {host_url}", "VibeKit")
                 return host_url
             else:
-                error_msg = f"Failed to get host URL: {response.text}"
-                ui.error(error_msg, "VibeKit")
-                raise Exception(error_msg)
+                raise Exception(f"Failed to get host URL: {response.text}")
                 
         except Exception as e:
             ui.error(f"Error getting host URL: {e}", "VibeKit")
             raise
     
-    async def get_session(self) -> str:
-        """Get current VibeKit session"""
+    async def get_session(self) -> Optional[str]:
+        """Get current session ID"""
         try:
             response = await self.client.get(
                 f"{self.bridge_url}/api/sandbox/session/{self.project_id}"
@@ -152,35 +162,26 @@ class VibeKitService:
             
             if response.status_code == 200:
                 data = response.json()
-                self.session_id = data["session"]
-                return self.session_id
+                return data.get("sessionId")
             else:
-                raise Exception(f"Failed to get session: {response.text}")
+                return None
                 
         except Exception as e:
-            ui.error(f"Error getting session: {e}", "VibeKit")
-            raise
+            ui.warning(f"Error getting session: {e}", "VibeKit")
+            return None
     
     async def set_session(self, session_id: str) -> None:
-        """Set VibeKit session"""
+        """Set session ID"""
         try:
-            response = await self.client.post(
+            await self.client.post(
                 f"{self.bridge_url}/api/sandbox/session/{self.project_id}",
                 json={"sessionId": session_id}
             )
-            
-            if response.status_code == 200:
-                self.session_id = session_id
-                ui.success(f"Session set: {session_id}", "VibeKit")
-            else:
-                raise Exception(f"Failed to set session: {response.text}")
-                
         except Exception as e:
-            ui.error(f"Error setting session: {e}", "VibeKit")
-            raise
+            ui.warning(f"Error setting session: {e}", "VibeKit")
     
     async def cleanup(self) -> None:
-        """Cleanup sandbox resources"""
+        """Cleanup sandbox"""
         try:
             ui.info(f"Cleaning up sandbox for project: {self.project_id}", "VibeKit")
             
@@ -191,27 +192,16 @@ class VibeKitService:
             if response.status_code == 200:
                 ui.success("Sandbox cleaned up successfully", "VibeKit")
             else:
-                ui.warning(f"Sandbox cleanup warning: {response.text}", "VibeKit")
+                ui.warning(f"Cleanup warning: {response.text}", "VibeKit")
                 
         except Exception as e:
             ui.error(f"Error cleaning up sandbox: {e}", "VibeKit")
         finally:
             await self.client.aclose()
-    
-    async def health_check(self) -> Dict[str, Any]:
-        """Check VibeKit bridge health"""
-        try:
-            response = await self.client.get(f"{self.bridge_url}/api/health")
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {"status": "error", "message": response.text}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
 
 
-# Global VibeKit service instances cache
-_vibekit_services = {}
+# Global service instances
+_vibekit_services: Dict[str, VibeKitService] = {}
 
 
 def get_vibekit_service(project_id: str) -> VibeKitService:
@@ -221,12 +211,8 @@ def get_vibekit_service(project_id: str) -> VibeKitService:
     return _vibekit_services[project_id]
 
 
-async def cleanup_all_sandboxes():
-    """Cleanup all active sandboxes"""
-    for project_id, service in _vibekit_services.items():
-        try:
-            await service.cleanup()
-        except Exception as e:
-            ui.error(f"Error cleaning up sandbox for project {project_id}: {e}", "VibeKit")
+async def cleanup_all_services():
+    """Cleanup all VibeKit services"""
+    for service in _vibekit_services.values():
+        await service.cleanup()
     _vibekit_services.clear()
-

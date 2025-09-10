@@ -16,6 +16,7 @@ from app.services.local_runtime import (
     get_preview_logs,
     get_all_preview_logs
 )
+from app.services.vibekit_service import get_vibekit_service
 
 
 router = APIRouter()
@@ -50,6 +51,47 @@ async def start_preview(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
+    # Check if this is a VibeKit sandbox project
+    if project.sandbox_id and project.sandbox_status == "active":
+        try:
+            # Use VibeKit sandbox for preview
+            vibekit = get_vibekit_service(project_id)
+            
+            # Start development server in sandbox
+            dev_result = await vibekit.execute_command(
+                f"cd /vibe0/my-app-{project_id.replace('project-', '')} && npm run dev -- --port 3000",
+                {"background": True}
+            )
+            
+            if dev_result.get("success"):
+                # Get host URL for the sandbox
+                host_url = await vibekit.get_host(3000)
+                
+                # Update project with preview info
+                project.preview_url = host_url
+                project.preview_port = 3000
+                project.status = "running"
+                db.commit()
+                
+                return PreviewStatusResponse(
+                    running=True,
+                    port=3000,
+                    url=host_url,
+                    process_id=None  # VibeKit doesn't provide process ID
+                )
+            else:
+                return PreviewStatusResponse(
+                    running=False,
+                    error=f"Failed to start dev server: {dev_result.get('error', 'Unknown error')}"
+                )
+                
+        except Exception as e:
+            return PreviewStatusResponse(
+                running=False,
+                error=f"VibeKit preview error: {str(e)}"
+            )
+    
+    # Fallback to local preview for non-sandbox projects
     # Check if preview is already running
     status = preview_status(project_id)
     if status == "running":

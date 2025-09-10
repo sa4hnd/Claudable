@@ -15,19 +15,64 @@ from app.services.filesystem import (
     init_git_repo,
     write_env_file
 )
+from app.services.project.sandbox_initializer import initialize_project_sandbox
 
 
-async def initialize_project(project_id: str, name: str) -> str:
+async def initialize_project(project_id: str, name: str, preferred_cli: str = "claude") -> str:
     """
     Initialize a new project with directory structure and scaffolding
     
     Args:
         project_id: Unique project identifier
         name: Human-readable project name
+        preferred_cli: CLI preference (claude, cursor, etc.)
     
     Returns:
-        str: Path to the created project directory
+        str: Path to the created project directory or sandbox info
     """
+    
+    # For Claude Code, use VibeKit sandbox initialization
+    if preferred_cli == "claude":
+        try:
+            # Use VibeKit sandbox initialization
+            sandbox_info = await initialize_project_sandbox(project_id, name)
+            
+            # Create local project directory for metadata and assets
+            project_path = os.path.join(settings.projects_root, project_id, "repo")
+            ensure_dir(project_path)
+            
+            # Create assets directory
+            assets_path = os.path.join(settings.projects_root, project_id, "assets")
+            ensure_dir(assets_path)
+            
+            # Store sandbox info in project metadata
+            create_project_metadata(project_id, name, sandbox_info)
+            
+            # Store sandbox info in database
+            from app.models.projects import Project
+            from app.db.session import get_db
+            db_session = next(get_db())
+            project = db_session.query(Project).filter(Project.id == project_id).first()
+            if project:
+                project.sandbox_id = sandbox_info.get("sandbox_id")
+                project.sandbox_status = "active"
+                project.repo_path = f"/vibe0/my-app-{project_id}"  # Project will be created by Claude Code
+                db_session.commit()
+            
+            return f"/vibe0/my-app-{project_id}"  # Return expected project directory
+            
+        except Exception as e:
+            # Fallback to local initialization if VibeKit fails
+            print(f"VibeKit initialization failed, falling back to local: {e}")
+            return await _initialize_project_local(project_id, name)
+    
+    else:
+        # For other CLIs, use local file system initialization
+        return await _initialize_project_local(project_id, name)
+
+
+async def _initialize_project_local(project_id: str, name: str) -> str:
+    """Initialize project using local file system (fallback method)"""
     
     # Create project directory
     project_path = os.path.join(settings.projects_root, project_id, "repo")
@@ -188,7 +233,7 @@ async def project_exists(project_id: str) -> bool:
     return os.path.exists(project_path)
 
 
-def create_project_metadata(project_id: str, name: str):
+def create_project_metadata(project_id: str, name: str, sandbox_info: dict = None):
     """
     Create initial metadata file with placeholder content
     This will be filled by CLI Agent based on the user's initial prompt
@@ -196,6 +241,7 @@ def create_project_metadata(project_id: str, name: str):
     Args:
         project_id: Project identifier
         name: Project name
+        sandbox_info: Optional sandbox information for VibeKit projects
     """
     
     # Create data directory structure
@@ -207,6 +253,10 @@ def create_project_metadata(project_id: str, name: str):
         "name": name,
         "description": "Project created with AI assistance"
     }
+    
+    # Add sandbox info if provided
+    if sandbox_info:
+        metadata_data["sandbox"] = sandbox_info
     
     metadata_path = os.path.join(metadata_dir, f"{project_id}.json")
     

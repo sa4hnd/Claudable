@@ -84,9 +84,10 @@ async def get_cli_status() -> Dict[str, Any]:
     results = {}
     
     # 새로운 UnifiedCLIManager의 CLI 인스턴스 사용
-    from app.services.cli.unified_manager import ClaudeCodeCLI, CursorAgentCLI, CodexCLI, QwenCLI, GeminiCLI
+    from app.services.cli.adapters.claude_code_sandbox import ClaudeCodeSandboxCLI
+    from app.services.cli.unified_manager import CursorAgentCLI, CodexCLI, QwenCLI, GeminiCLI
     cli_instances = {
-        "claude": ClaudeCodeCLI(),
+        "claude": ClaudeCodeSandboxCLI(),
         "cursor": CursorAgentCLI(),
         "codex": CodexCLI(),
         "qwen": QwenCLI(),

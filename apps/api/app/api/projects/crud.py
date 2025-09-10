@@ -20,6 +20,7 @@ from app.models.project_services import ProjectServiceConnection
 from app.models.sessions import Session as SessionModel
 from app.services.project.initializer import initialize_project
 from app.core.websocket.manager import manager as websocket_manager
+from app.core.config import settings
 
 # Project ID validation regex
 PROJECT_ID_REGEX = re.compile(r"^[a-z0-9-]{3,}$")
@@ -90,12 +91,32 @@ async def initialize_project_background(project_id: str, project_name: str, body
             
             # Task 1: Initialize project files
             async def init_project_task():
-                project_path = await initialize_project(project_id, project_name)
+                project_path = await initialize_project(project_id, project_name, body.preferred_cli)
                 
                 # Update project with repo path using fresh session
                 project = db_session.query(ProjectModel).filter(ProjectModel.id == project_id).first()
                 if project:
                     project.repo_path = project_path
+                    
+                    # If this is a VibeKit project, update sandbox status
+                    if body.preferred_cli == "claude":
+                        # Check if sandbox info was created
+                        metadata_path = os.path.join(settings.projects_root, project_id, "data", "metadata", f"{project_id}.json")
+                        if os.path.exists(metadata_path):
+                            try:
+                                import json
+                                with open(metadata_path, 'r') as f:
+                                    metadata = json.load(f)
+                                
+                                if metadata.get("sandbox"):
+                                    sandbox_info = metadata["sandbox"]
+                                    project.sandbox_id = sandbox_info.get("sandbox_id")
+                                    project.sandbox_status = "active"
+                                    project.host_url = sandbox_info.get("host_url")
+                                    project.last_sandbox_activity = datetime.utcnow()
+                            except Exception as e:
+                                print(f"Warning: Could not load sandbox metadata: {e}")
+                    
                     db_session.commit()
                 
                 return project_path

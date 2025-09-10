@@ -35,27 +35,13 @@ async def initialize_project_sandbox(project_id: str, name: str) -> Dict[str, An
         # Initialize sandbox
         sandbox_id = await vibekit.initialize_sandbox()
         
-        # Create project directory structure in sandbox
-        await vibekit.execute_command("mkdir -p /workspace")
+        # Navigate to /vibe0 directory (like your test script)
+        ui.info("Navigating to /vibe0 directory", "SandboxInit")
+        await vibekit.execute_command("cd /vibe0 && pwd")
         
-        # Change to workspace directory
-        await vibekit.execute_command("cd /workspace")
-        
-        # Execute project creation commands (replaces scaffold_nextjs_minimal)
-        ui.info("Creating Next.js project structure", "SandboxInit")
-        await vibekit.execute_command(
-            "npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias '@/*' --yes",
-            {"background": False}
-        )
-        
-        # Initialize git repository (replaces init_git_repo)
-        ui.info("Initializing git repository", "SandboxInit")
-        await vibekit.execute_command("git init && git add . && git commit -m 'Initial commit'")
-        
-        # Create .env file (replaces write_env_file)
-        ui.info("Creating environment file", "SandboxInit")
-        env_content = f"NEXT_PUBLIC_PROJECT_ID={project_id}\nNEXT_PUBLIC_PROJECT_NAME={name}\n"
-        await vibekit.execute_command(f"echo '{env_content}' > .env")
+        # Note: Next.js project creation will be handled by Claude Code execution
+        # This sandbox initializer just sets up the sandbox environment
+        ui.info("Sandbox environment ready for Claude Code execution", "SandboxInit")
         
         # Get host URL for preview
         ui.info("Getting preview host URL", "SandboxInit")

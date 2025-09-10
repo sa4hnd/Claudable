@@ -23,6 +23,11 @@ class ClaudeCodeSandboxCLI(BaseCLI):
     def __init__(self):
         super().__init__(CLIType.CLAUDE)
         self.session_mapping: Dict[str, str] = {}
+        self.session_id: Optional[str] = None
+
+    def set_session_id(self, session_id: str) -> None:
+        """Set session ID for the CLI"""
+        self.session_id = session_id
 
     async def check_availability(self) -> Dict[str, Any]:
         """Check if VibeKit sandbox is available"""
@@ -72,16 +77,47 @@ class ClaudeCodeSandboxCLI(BaseCLI):
         if log_callback:
             await log_callback("Starting sandbox execution...")
 
-        # Extract project ID from project path
+        # Extract project ID from project path or get from database
         project_id = self._extract_project_id(project_path)
         if not project_id:
-            ui.error("Could not extract project ID from path", "Claude Sandbox")
+            # Try to get project ID from database using session_id
+            try:
+                from app.models.projects import Project
+                from app.db.session import get_db
+                db_session = next(get_db())
+                # Look for project with this session_id in any of the session fields
+                project = db_session.query(Project).filter(
+                    (Project.active_claude_session_id == session_id) |
+                    (Project.active_cursor_session_id == session_id)
+                ).first()
+                if project:
+                    project_id = project.id
+                    ui.info(f"Found project ID from database: {project_id}", "Claude Sandbox")
+                else:
+                    # Fallback to using session_id as project_id
+                    project_id = session_id.split('-')[0] if '-' in session_id else session_id
+                    ui.warning(f"Using session_id as project_id: {project_id}", "Claude Sandbox")
+            except Exception as e:
+                ui.warning(f"Could not get project from database: {e}", "Claude Sandbox")
+                project_id = session_id.split('-')[0] if '-' in session_id else session_id
+                ui.warning(f"Using session_id as project_id: {project_id}", "Claude Sandbox")
+        
+        if not project_id:
+            ui.error("Could not extract project ID from path or session", "Claude Sandbox")
             yield Message(
+                id=str(uuid.uuid4()),
+                project_id="unknown",
                 role="assistant",
                 content="Error: Could not determine project ID",
-                message_type="error"
+                message_type="error",
+                metadata_json={"cli_type": "claude"},
+                session_id=session_id,
+                created_at=datetime.utcnow()
             )
             return
+
+        # Get CLI-specific model name first
+        cli_model = self._get_cli_model_name(model) or "claude-sonnet-4-20250514"
 
         try:
             # Get VibeKit service for this project
@@ -89,6 +125,24 @@ class ClaudeCodeSandboxCLI(BaseCLI):
             
             # Initialize sandbox if not already done
             if not vibekit.sandbox_id:
+                # Show sandbox initialization status
+                yield Message(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    role="assistant",
+                    content="🌐 **Initializing sandbox environment...**",
+                    message_type="info",
+                    metadata_json={
+                        "sandbox_id": None,  # Not yet initialized
+                        "model": cli_model,
+                        "session_id": session_id,
+                        "cli_type": "claude",
+                        "event_type": "sandbox_initialization"
+                    },
+                    session_id=session_id,
+                    created_at=datetime.utcnow()
+                )
+                
                 await vibekit.initialize_sandbox()
 
             # Resume session if provided
@@ -106,62 +160,256 @@ class ClaudeCodeSandboxCLI(BaseCLI):
                     "You are Claude Code, an AI coding assistant specialized in building modern web applications."
                 )
 
-            # Get CLI-specific model name
-            cli_model = self._get_cli_model_name(model) or "claude-sonnet-4-20250514"
+        except Exception as e:
+            ui.error(f"Error in sandbox setup: {e}", "Claude Sandbox")
+            yield Message(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                role="assistant",
+                content=f"Error: {str(e)}",
+                message_type="error",
+                metadata_json={
+                    "sandbox_id": None,
+                    "error": str(e),
+                    "cli_type": "claude"
+                },
+                session_id=session_id,
+                created_at=datetime.utcnow()
+            )
+            return
 
-            # Add project directory structure for initial prompts
+        # For initial prompts, we need to create the Next.js project first (like your test script)
             if is_initial_prompt:
-                project_structure_info = """
-<initial_context>
-## Project Directory Structure (node_modules are already installed)
-.eslintrc.json
-.gitignore
-next.config.mjs
-next-env.d.ts
-package.json
-postcss.config.mjs
-README.md
-tailwind.config.ts
-tsconfig.json
-.env
-src/app/favicon.ico
-src/app/globals.css
-src/app/layout.tsx
-src/app/page.tsx
-public/
-node_modules/
-</initial_context>"""
-                instruction = instruction + project_structure_info
-                ui.info("Added project structure info to initial prompt", "Claude Sandbox")
+            ui.info("Initial prompt detected - creating Next.js project first", "Claude Sandbox")
+            
+            # Show sandbox initialization status
+            yield Message(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                role="assistant",
+                content="🚀 **Opening sandbox environment...**",
+                message_type="info",
+                metadata_json={
+                    "sandbox_id": vibekit.sandbox_id,
+                    "model": cli_model,
+                    "session_id": session_id,
+                    "cli_type": "claude",
+                    "event_type": "sandbox_init"
+                },
+                session_id=session_id,
+                created_at=datetime.utcnow()
+            )
+            
+            # Create Next.js project in /vibe0 (like your test script)
+            app_name = f"my-app-{project_id}"
+            ui.info(f"Creating Next.js project '{app_name}' in /vibe0", "Claude Sandbox")
+            
+            # Show project creation status
+            yield Message(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                role="assistant",
+                content="📦 **Creating Next.js project...**",
+                message_type="info",
+                metadata_json={
+                    "sandbox_id": vibekit.sandbox_id,
+                    "model": cli_model,
+                    "session_id": session_id,
+                    "cli_type": "claude",
+                    "event_type": "project_creation"
+                },
+                session_id=session_id,
+                created_at=datetime.utcnow()
+            )
+            
+            # Clean up any existing directories
+            await vibekit.execute_command("cd /vibe0 && rm -rf my-app*")
+            
+            # Create Next.js project
+            create_cmd = [
+                "npx", "create-next-app@latest", app_name,
+                "--typescript", "--tailwind", "--eslint", "--app",
+                "--import-alias", "@/*", "--use-npm", "--yes"
+            ]
+            
+            result = await vibekit.execute_command(f"cd /vibe0 && {' '.join(create_cmd)}")
+            if not result.get("success"):
+                raise Exception(f"Failed to create Next.js project: {result}")
+            
+            # Navigate to project directory
+            project_dir = f"/vibe0/{app_name}"
+            await vibekit.execute_command(f"cd {project_dir} && pwd")
+            
+            # Show git setup status
+            yield Message(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                role="assistant",
+                content="🔧 **Setting up git repository...**",
+                message_type="info",
+                metadata_json={
+                    "sandbox_id": vibekit.sandbox_id,
+                    "model": cli_model,
+                    "session_id": session_id,
+                    "cli_type": "claude",
+                    "event_type": "git_setup"
+                },
+                session_id=session_id,
+                created_at=datetime.utcnow()
+            )
+            
+            # Create .env file
+            env_content = f"NEXT_PUBLIC_PROJECT_ID={project_id}\nNEXT_PUBLIC_PROJECT_NAME=Claudable Project"
+            await vibekit.execute_command(f"cd {project_dir} && echo '{env_content}' > .env")
+            
+            # Initialize git repository
+            await vibekit.execute_command(f"cd {project_dir} && git config --global user.email 'shexhtc@gmail.com' && git config --global user.name 'sa4hnd'")
+            await vibekit.execute_command(f"cd {project_dir} && git init")
+            await vibekit.execute_command(f"cd {project_dir} && git add .")
+            await vibekit.execute_command(f"cd {project_dir} && git commit -m 'Initial commit'")
+            
+            # Show dev server startup status
+            yield Message(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                role="assistant",
+                content="⚡ **Starting development server...**",
+                message_type="info",
+                metadata_json={
+                    "sandbox_id": vibekit.sandbox_id,
+                    "model": cli_model,
+                    "session_id": session_id,
+                    "cli_type": "claude",
+                    "event_type": "dev_server_start"
+                },
+                session_id=session_id,
+                created_at=datetime.utcnow()
+            )
+            
+            # Start development server in background (like your test script)
+            ui.info("Starting development server in background", "Claude Sandbox")
+            dev_result = await vibekit.execute_command(f"cd {project_dir} && npm run dev -- --port 3000", {"background": True})
+            if not dev_result.get("success"):
+                ui.warning(f"Dev server failed to start: {dev_result}", "Claude Sandbox")
+            else:
+                ui.info("Development server started in background", "Claude Sandbox")
+            
+            # Get preview URL (like your test script)
+            host_url = await vibekit.get_host(3000)
+            ui.info(f"Preview URL: {host_url}", "Claude Sandbox")
+            
+            # Show completion status
+            yield Message(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                role="assistant",
+                content=f"✅ **Project ready!** Preview: {host_url}",
+                message_type="info",
+                metadata_json={
+                    "sandbox_id": vibekit.sandbox_id,
+                    "model": cli_model,
+                    "session_id": session_id,
+                    "cli_type": "claude",
+                    "event_type": "project_ready",
+                    "preview_url": host_url
+                },
+                session_id=session_id,
+                created_at=datetime.utcnow()
+            )
+            
+            # Update the instruction to work in the project directory
+            instruction = f"Working in directory: {project_dir}\n\n{instruction}"
+            ui.info(f"Next.js project created and ready at {project_dir}", "Claude Sandbox")
 
             # Build the full prompt with system context
             full_prompt = f"{system_prompt}\n\nUser Request: {instruction}"
 
             # Stream code generation
             async for chunk in vibekit.generate_code(full_prompt, streaming=True):
+                ui.debug(f"Claude Sandbox received chunk: {chunk}", "Claude Sandbox")
                 if log_callback:
                     await log_callback(f"Received chunk: {chunk.get('type', 'unknown')}")
 
-                if chunk.get("type") == "code_generation":
+                if chunk.get("type") == "update":
+                    # Handle streaming updates from Claude - use "chat" message type like other CLIs
+                    content = chunk.get("content", "")
+                    ui.debug(f"Claude Sandbox update content: '{content}'", "Claude Sandbox")
+                    if content:
+                        yield Message(
+                            id=str(uuid.uuid4()),
+                            project_id=project_id,
+                            role="assistant",
+                            content=content,
+                            message_type="chat",
+                            metadata_json={
+                                "sandbox_id": vibekit.sandbox_id,
+                                "model": cli_model,
+                                "session_id": session_id,
+                                "cli_type": "claude",
+                                "event_type": "streaming_update"
+                            },
+                            session_id=session_id,
+                            created_at=datetime.utcnow()
+                        )
+                elif chunk.get("type") == "tool_use":
+                    # Handle tool usage messages - show what Claude is doing
+                    content = chunk.get("content", "")
+                    tool_name = chunk.get("tool_name", "Unknown Tool")
+                    tool_input = chunk.get("tool_input", {})
+                    tool_id = chunk.get("tool_id", "")
+                    
+                    ui.debug(f"Claude Sandbox tool usage: {tool_name} - {content}", "Claude Sandbox")
+                    if content:
+                        yield Message(
+                            id=str(uuid.uuid4()),
+                            project_id=project_id,
+                            role="assistant",
+                            content=content,
+                            message_type="tool_use",
+                            metadata_json={
+                                "sandbox_id": vibekit.sandbox_id,
+                                "model": cli_model,
+                                "session_id": session_id,
+                                "cli_type": "claude",
+                                "event_type": "tool_usage",
+                                "tool_name": tool_name,
+                                "tool_input": tool_input,
+                                "tool_id": tool_id
+                            },
+                            session_id=session_id,
+                            created_at=datetime.utcnow()
+                        )
+                elif chunk.get("type") == "code_generation":
                     yield Message(
+                        id=str(uuid.uuid4()),
+                        project_id=project_id,
                         role="assistant",
                         content=chunk.get("content", ""),
-                        message_type="code_generation",
+                        message_type="chat",
                         metadata_json={
                             "sandbox_id": vibekit.sandbox_id,
                             "model": cli_model,
-                            "session_id": session_id
-                        }
+                            "session_id": session_id,
+                            "cli_type": "claude",
+                            "event_type": "code_generation"
+                        },
+                        session_id=session_id,
+                        created_at=datetime.utcnow()
                     )
                 elif chunk.get("type") == "error":
                     yield Message(
+                        id=str(uuid.uuid4()),
+                        project_id=project_id,
                         role="assistant",
                         content=f"Error: {chunk.get('error', 'Unknown error')}",
                         message_type="error",
                         metadata_json={
                             "sandbox_id": vibekit.sandbox_id,
-                            "error": chunk.get("error")
-                        }
+                            "error": chunk.get("error"),
+                            "cli_type": "claude"
+                        },
+                        session_id=session_id,
+                        created_at=datetime.utcnow()
                     )
                 elif chunk.get("type") == "complete":
                     # Get current session ID for resumption
@@ -170,25 +418,19 @@ node_modules/
                         self.session_mapping[project_id] = current_session
                     
                     yield Message(
+                        id=str(uuid.uuid4()),
+                        project_id=project_id,
                         role="assistant",
                         content="Code generation completed",
-                        message_type="completion",
+                        message_type="info",
                         metadata_json={
                             "sandbox_id": vibekit.sandbox_id,
-                            "session_id": current_session
-                        }
-                    )
-
-        except Exception as e:
-            ui.error(f"Error in sandbox execution: {e}", "Claude Sandbox")
-            yield Message(
-                role="assistant",
-                content=f"Error: {str(e)}",
-                message_type="error",
-                metadata_json={
-                    "sandbox_id": getattr(vibekit, 'sandbox_id', None),
-                    "error": str(e)
-                }
+                            "session_id": current_session,
+                            "cli_type": "claude",
+                            "event_type": "completion"
+                        },
+                        session_id=session_id,
+                        created_at=datetime.utcnow()
             )
 
     def _extract_project_id(self, project_path: str) -> Optional[str]:
