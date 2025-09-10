@@ -179,7 +179,7 @@ class ClaudeCodeSandboxCLI(BaseCLI):
             return
 
         # For initial prompts, we need to create the Next.js project first (like your test script)
-            if is_initial_prompt:
+        if is_initial_prompt:
             ui.info("Initial prompt detected - creating Next.js project first", "Claude Sandbox")
             
             # Show sandbox initialization status
