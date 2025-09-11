@@ -58,6 +58,9 @@ app.post('/api/sandbox/initialize', async (req, res) => {
       console.log(`[VibeKit] Created and navigated to /vibe0 directory`);
     }
 
+    // Using npm for package management (Bun requires unzip which is not available in E2B sandbox)
+    console.log(`[VibeKit] Using npm for package management`);
+
     // Configure Claude Code API settings in sandbox (like you do locally)
     console.log(`[VibeKit] Configuring Claude Code API settings in sandbox...`);
     
@@ -130,9 +133,9 @@ app.post('/api/sandbox/generate-code', async (req, res) => {
         if (projectId.startsWith('project-')) {
           // Extract the actual project ID from the full project ID
           const actualProjectId = projectId.replace('project-', '').split('-')[0];
-          projectDir = `/vibe0/my-app-${actualProjectId}`;
+          projectDir = `/vibe0/my-app${actualProjectId}`;
         } else {
-          projectDir = `/vibe0/my-app-${projectId}`;
+          projectDir = `/vibe0/my-app${projectId}`;
         }
         console.log(`[VibeKit] Navigating to project directory: ${projectDir}`);
         
@@ -324,9 +327,9 @@ app.post('/api/sandbox/generate-code', async (req, res) => {
       if (projectId.startsWith('project-')) {
         // Extract the actual project ID from the full project ID
         const actualProjectId = projectId.replace('project-', '').split('-')[0];
-        projectDir = `/vibe0/my-app-${actualProjectId}`;
+        projectDir = `/vibe0/my-app${actualProjectId}`;
       } else {
-        projectDir = `/vibe0/my-app-${projectId}`;
+        projectDir = `/vibe0/my-app${projectId}`;
       }
       console.log(`[VibeKit] Navigating to project directory: ${projectDir}`);
       
@@ -381,35 +384,54 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
 
     console.log(`[VibeKit] Executing command: ${command}`);
     
-    // Special handling for create-next-app: start in background, return after 3 seconds, complete in background
-    if (command.includes('create-next-app')) {
-      console.log(`[VibeKit] Detected create-next-app command - starting in background with dev server`);
+    // Special handling for git clone template-expo: start in background, return after 3 seconds, complete in background
+    if (command.includes('git clone') && command.includes('template-expo')) {
+      console.log(`[VibeKit] Detected git clone template-expo command - starting in background with npm and Expo dev server`);
       
       // Initialize completion tracking
-      sandbox.createNextAppCompleted = false;
-      sandbox.createNextAppResult = null;
+      sandbox.createExpoAppCompleted = false;
+      sandbox.createExpoAppResult = null;
       
       // Extract the project directory name from the command
-      const projectDirMatch = command.match(/my-app-[a-f0-9]+/);
+      const projectDirMatch = command.match(/my-app[a-f0-9]+/);
       const projectDir = projectDirMatch ? projectDirMatch[0] : 'my-app';
       const fullProjectPath = `/vibe0/${projectDir}`;
       
-      // Chain create-next-app with npm run dev
-      const chainedCommand = `${command} && cd ${projectDir} && npm run dev -- --port 3000`;
-      console.log(`[VibeKit] Chained command: ${chainedCommand}`);
+      // Generate custom URLs based on project folder name
+      const generateProjectUrls = (projectDir) => {
+        return {
+          mobile: `exp://${projectDir}.ngrok.io`,
+          web: `https://3000-${projectDir}.e2b.dev`
+        };
+      };
+      
+      const projectUrls = generateProjectUrls(projectDir);
+      console.log(`[VibeKit] Generated URLs:`, projectUrls);
+      
+      // Check if command already includes npx expo start (chained from Python)
+      let chainedCommand;
+      if (command.includes('npx expo start')) {
+        // Command is already chained from Python, use as-is
+        chainedCommand = command;
+        console.log(`[VibeKit] Command already chained from Python: ${chainedCommand}`);
+      } else {
+        // Chain git clone with npm install and npx expo start
+        chainedCommand = `${command} && cd ${projectDir} && npm install && npm install @expo/ngrok@4.1.0 --save-dev && export EXPO_TUNNEL_SUBDOMAIN=${projectDir} && npx expo start --tunnel --port 3000`;
+        console.log(`[VibeKit] Chained command: ${chainedCommand}`);
+      }
       
       // Start the chained command in background
       const startBackgroundProcess = async () => {
         try {
-          console.log(`[VibeKit] Starting create-next-app + dev server process...`);
+          console.log(`[VibeKit] Starting git clone template-expo + npm install + Expo dev server process...`);
           const result = await vibeKit.executeCommand(chainedCommand, options);
-          console.log(`[VibeKit] create-next-app + dev server ACTUALLY completed:`, result);
-          sandbox.createNextAppCompleted = true;
-          sandbox.createNextAppResult = result;
+          console.log(`[VibeKit] git clone template-expo + npm install + Expo dev server ACTUALLY completed:`, result);
+          sandbox.createExpoAppCompleted = true;
+          sandbox.createExpoAppResult = { ...result, urls: projectUrls };
         } catch (error) {
-          console.error(`[VibeKit] create-next-app + dev server failed:`, error);
-          sandbox.createNextAppCompleted = true;
-          sandbox.createNextAppResult = { success: false, error: error.message };
+          console.error(`[VibeKit] git clone template-expo + npm install + Expo dev server failed:`, error);
+          sandbox.createExpoAppCompleted = true;
+          sandbox.createExpoAppResult = { success: false, error: error.message, urls: projectUrls };
         }
       };
       
@@ -422,23 +444,24 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
       // Return success after 3 seconds so Claude Code can start coding
       res.json({
         success: true,
-        output: 'Next.js project creation started with dev server. Claude Code can now begin coding while setup completes in background.',
+        output: 'Expo template cloning started with npm and dev server. Claude Code can now begin coding while setup completes in background.',
         stderr: '',
         exitCode: 0,
         sandboxId: sandbox.sandboxId,
         background: true,
-        message: 'Project creation + dev server starting - you can start coding now!'
+        message: 'Expo template cloning + npm install + dev server starting - you can start coding now!',
+        urls: projectUrls
       });
       
       return;
     }
     
     // Special handling for commands that need the project directory to exist
-    if (command.includes('my-app-') && (command.includes('cd /vibe0/my-app-') || command.includes('&& cd my-app-'))) {
+    if (command.includes('my-app') && (command.includes('cd /vibe0/my-app') || command.includes('&& cd my-app'))) {
       console.log(`[VibeKit] Detected command that needs project directory - checking if it exists`);
       
       // Extract project directory from command
-      const projectDirMatch = command.match(/my-app-[a-f0-9]+/);
+      const projectDirMatch = command.match(/my-app[a-f0-9]+/);
       if (projectDirMatch) {
         const projectDir = projectDirMatch[0];
         const fullProjectPath = `/vibe0/${projectDir}`;
@@ -479,7 +502,7 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
       }
     }
     
-    // Note: npm run dev is now handled automatically as part of create-next-app command
+    // Note: npx expo start is now handled automatically as part of git clone template-expo command
     
     // Special handling for npm install: start in background and return early
     if (command.includes('npm install')) {
@@ -489,14 +512,14 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
       const backgroundPromise = vibeKit.executeCommand(command, { ...options, background: true });
       
       // Return success immediately
-      res.json({
+        res.json({
         success: true,
-        output: 'Dependencies installation started in background. You can continue coding while packages install.',
+        output: 'Dependencies installation started with npm in background. You can continue coding while packages install.',
         stderr: '',
         exitCode: 0,
-        sandboxId: sandbox.sandboxId,
+          sandboxId: sandbox.sandboxId,
         background: true,
-        message: 'Dependencies installing in background - you can continue coding!'
+        message: 'Dependencies installing with npm in background - you can continue coding!'
       });
       
       // Continue the background process

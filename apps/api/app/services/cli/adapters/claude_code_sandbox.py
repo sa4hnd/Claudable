@@ -200,16 +200,16 @@ class ClaudeCodeSandboxCLI(BaseCLI):
                 created_at=datetime.utcnow()
             )
             
-            # Create Next.js project in /vibe0 (like your test script)
-            app_name = f"my-app-{project_id}"
-            ui.info(f"Creating Next.js project '{app_name}' in /vibe0", "Claude Sandbox")
+            # Create Expo project from template in /vibe0 (like your test script)
+            app_name = f"my-app{project_id}"
+            ui.info(f"Creating Expo project from template '{app_name}' in /vibe0", "Claude Sandbox")
             
             # Show project creation status
             yield Message(
                 id=str(uuid.uuid4()),
                 project_id=project_id,
                 role="assistant",
-                content="📦 **Creating Next.js project...**",
+                content="📦 **Cloning Expo template...**",
                 message_type="info",
                 metadata_json={
                     "sandbox_id": vibekit.sandbox_id,
@@ -225,20 +225,13 @@ class ClaudeCodeSandboxCLI(BaseCLI):
             # Clean up any existing directories
             await vibekit.execute_command("cd /vibe0 && rm -rf my-app*")
             
-            # Create Next.js project
-            create_cmd = [
-                "npx", "create-next-app@latest", app_name,
-                "--typescript", "--tailwind", "--eslint", "--app",
-                "--import-alias", "@/*", "--use-npm", "--yes"
-            ]
-            
-            result = await vibekit.execute_command(f"cd /vibe0 && {' '.join(create_cmd)}")
-            if not result.get("success"):
-                raise Exception(f"Failed to create Next.js project: {result}")
-            
-            # Navigate to project directory
+            # Clone template repo and start dev server with npm
             project_dir = f"/vibe0/{app_name}"
-            await vibekit.execute_command(f"cd {project_dir} && pwd")
+            chained_cmd = f"cd /vibe0 && git clone https://github.com/sa4hnd/template-expo.git {app_name} && cd {app_name} && npm install && npm install @expo/ngrok@4.1.0 --save-dev && export EXPO_TUNNEL_SUBDOMAIN={app_name} && npx expo start --tunnel --port 3000"
+            
+            result = await vibekit.execute_command(chained_cmd)
+            if not result.get("success"):
+                raise Exception(f"Failed to create Expo project and start dev server: {result}")
             
             # Show git setup status
             yield Message(
@@ -268,42 +261,24 @@ class ClaudeCodeSandboxCLI(BaseCLI):
             await vibekit.execute_command(f"cd {project_dir} && git add .")
             await vibekit.execute_command(f"cd {project_dir} && git commit -m 'Initial commit'")
             
-            # Show dev server startup status
-            yield Message(
-                id=str(uuid.uuid4()),
-                project_id=project_id,
-                role="assistant",
-                content="⚡ **Starting development server...**",
-                message_type="info",
-                metadata_json={
-                    "sandbox_id": vibekit.sandbox_id,
-                    "model": cli_model,
-                    "session_id": session_id,
-                    "cli_type": "claude",
-                    "event_type": "dev_server_start"
-                },
-                session_id=session_id,
-                created_at=datetime.utcnow()
-            )
+            # Dev server is now started as part of the chained command above
+            ui.info("Expo development server started with npm and tunnel mode", "Claude Sandbox")
             
-            # Start development server in background (like your test script)
-            ui.info("Starting development server in background", "Claude Sandbox")
-            dev_result = await vibekit.execute_command(f"cd {project_dir} && npm run dev -- --port 3000", {"background": True})
-            if not dev_result.get("success"):
-                ui.warning(f"Dev server failed to start: {dev_result}", "Claude Sandbox")
-            else:
-                ui.info("Development server started in background", "Claude Sandbox")
-            
-            # Get preview URL (like your test script)
+            # Get preview URLs (like your test script)
             host_url = await vibekit.get_host(3000)
-            ui.info(f"Preview URL: {host_url}", "Claude Sandbox")
+            mobile_url = f"exp://{app_name}.ngrok.io"
+            web_url = f"https://3000-{app_name}.e2b.dev"
+            
+            ui.info(f"Web Preview URL: {web_url}", "Claude Sandbox")
+            ui.info(f"Mobile Preview URL: {mobile_url}", "Claude Sandbox")
+            ui.info("📱 Open in Expo Go app or scan QR code", "Claude Sandbox")
             
             # Show completion status
             yield Message(
                 id=str(uuid.uuid4()),
                 project_id=project_id,
                 role="assistant",
-                content=f"✅ **Project ready!** Preview: {host_url}",
+                content=f"✅ **Project ready!**\n\n🌐 **Web Preview**: {web_url}\n📱 **Mobile Preview**: {mobile_url}\n\nOpen in Expo Go app or scan QR code!",
                 message_type="info",
                 metadata_json={
                     "sandbox_id": vibekit.sandbox_id,
@@ -311,7 +286,8 @@ class ClaudeCodeSandboxCLI(BaseCLI):
                     "session_id": session_id,
                     "cli_type": "claude",
                     "event_type": "project_ready",
-                    "preview_url": host_url
+                    "preview_url": web_url,
+                    "mobile_url": mobile_url
                 },
                 session_id=session_id,
                 created_at=datetime.utcnow()
@@ -319,7 +295,7 @@ class ClaudeCodeSandboxCLI(BaseCLI):
             
             # Update the instruction to work in the project directory
             instruction = f"Working in directory: {project_dir}\n\n{instruction}"
-            ui.info(f"Next.js project created and ready at {project_dir}", "Claude Sandbox")
+            ui.info(f"Expo project created from template and ready at {project_dir}", "Claude Sandbox")
 
             # Build the full prompt with system context
             full_prompt = f"{system_prompt}\n\nUser Request: {instruction}"
