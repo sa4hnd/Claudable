@@ -14,10 +14,11 @@ app.use(cors());
 app.use(express.json());
 
 // VibeKit configuration
-const e2bProvider = createE2BProvider({
-  apiKey: process.env.E2B_API_KEY,
-  templateId: "vibekit-claude" // Use pre-built template
-});
+  const e2bProvider = createE2BProvider({
+    apiKey: process.env.E2B_API_KEY,
+    templateId: "clem5d03hnp8rivt17yh", // Use custom template with Claude Code and Bun (updated with user-installed Bun)
+    timeoutMs: 1800000 // 30 minutes (1,800,000 ms)
+  });
 
 const vibeKit = new VibeKit()
   .withAgent({
@@ -58,17 +59,28 @@ app.post('/api/sandbox/initialize', async (req, res) => {
       console.log(`[VibeKit] Created and navigated to /vibe0 directory`);
     }
 
-    // Using npm for package management (Bun requires unzip which is not available in E2B sandbox)
-    console.log(`[VibeKit] Using npm for package management`);
+    // Using Bun for package management (faster than npm)
+    console.log(`[VibeKit] Using Bun for package management`);
 
     // Configure Claude Code API settings in sandbox (like you do locally)
     console.log(`[VibeKit] Configuring Claude Code API settings in sandbox...`);
     
-    // Set environment variables for current session
-    await vibeKit.executeCommand("unset ANTHROPIC_API_KEY"); // Remove old API key
-    await vibeKit.executeCommand(`export ANTHROPIC_AUTH_TOKEN='${process.env.ANTHROPIC_API_KEY}'`);
-    await vibeKit.executeCommand(`export ANTHROPIC_BASE_URL='${process.env.ANTHROPIC_BASE_URL}'`);
-    await vibeKit.executeCommand(`export ANTHROPIC_API_KEY='${process.env.ANTHROPIC_API_KEY}'`); // Set both for compatibility
+    // Set up environment and Bun PATH in one command for speed
+    const setupCmd = `
+      unset ANTHROPIC_API_KEY && \
+      export ANTHROPIC_AUTH_TOKEN='${process.env.ANTHROPIC_API_KEY}' && \
+      export ANTHROPIC_BASE_URL='${process.env.ANTHROPIC_BASE_URL}' && \
+      export ANTHROPIC_API_KEY='${process.env.ANTHROPIC_API_KEY}' && \
+      export PATH='$HOME/.bun/bin:$PATH' && \
+      echo 'export BUN_INSTALL="$HOME/.bun"' >> ~/.bashrc && \
+      echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> ~/.bashrc && \
+      echo 'export BUN_INSTALL="$HOME/.bun"' >> ~/.zshrc && \
+      echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> ~/.zshrc && \
+      /home/user/.bun/bin/bun --version
+    `;
+    
+    const setupResult = await vibeKit.executeCommand(setupCmd);
+    console.log(`[VibeKit] Environment and Bun setup completed:`, setupResult);
     
     // Add to all shell profiles for persistence using echo -e with proper quoting
     await vibeKit.executeCommand("echo -e '\\n# Claude Code API Configuration' >> ~/.bash_profile");
@@ -386,7 +398,7 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
     
     // Special handling for git clone template-expo: start in background, return after 3 seconds, complete in background
     if (command.includes('git clone') && command.includes('template-expo')) {
-      console.log(`[VibeKit] Detected git clone template-expo command - starting in background with npm and Expo dev server`);
+      console.log(`[VibeKit] Detected git clone template-expo command - starting in background with Bun and Expo dev server`);
       
       // Initialize completion tracking
       sandbox.createExpoAppCompleted = false;
@@ -408,50 +420,65 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
       const projectUrls = generateProjectUrls(projectDir);
       console.log(`[VibeKit] Generated URLs:`, projectUrls);
       
-      // Check if command already includes npx expo start (chained from Python)
-      let chainedCommand;
-      if (command.includes('npx expo start')) {
-        // Command is already chained from Python, use as-is
-        chainedCommand = command;
-        console.log(`[VibeKit] Command already chained from Python: ${chainedCommand}`);
-      } else {
-        // Chain git clone with npm install and npx expo start
-        chainedCommand = `${command} && cd ${projectDir} && npm install && npm install @expo/ngrok@4.1.0 --save-dev && export EXPO_TUNNEL_SUBDOMAIN=${projectDir} && npx expo start --tunnel --port 3000`;
-        console.log(`[VibeKit] Chained command: ${chainedCommand}`);
-      }
-      
-      // Start the chained command in background
-      const startBackgroundProcess = async () => {
-        try {
-          console.log(`[VibeKit] Starting git clone template-expo + npm install + Expo dev server process...`);
-          const result = await vibeKit.executeCommand(chainedCommand, options);
-          console.log(`[VibeKit] git clone template-expo + npm install + Expo dev server ACTUALLY completed:`, result);
-          sandbox.createExpoAppCompleted = true;
-          sandbox.createExpoAppResult = { ...result, urls: projectUrls };
-        } catch (error) {
-          console.error(`[VibeKit] git clone template-expo + npm install + Expo dev server failed:`, error);
-          sandbox.createExpoAppCompleted = true;
-          sandbox.createExpoAppResult = { success: false, error: error.message, urls: projectUrls };
+      // Execute commands step by step synchronously
+      try {
+        console.log(`[VibeKit] Starting git clone template-expo process...`);
+        
+        // Step 1: Clone template
+        const cloneResult = await vibeKit.executeCommand(command, options);
+        if (cloneResult.exitCode !== 0) {
+          throw new Error(`Git clone failed: ${cloneResult.stderr}`);
         }
-      };
-      
-      // Start the background process (don't await it)
-      startBackgroundProcess();
-      
-      // Wait for 3 seconds to let the project structure be created
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Return success after 3 seconds so Claude Code can start coding
-      res.json({
-        success: true,
-        output: 'Expo template cloning started with npm and dev server. Claude Code can now begin coding while setup completes in background.',
-        stderr: '',
-        exitCode: 0,
-        sandboxId: sandbox.sandboxId,
-        background: true,
-        message: 'Expo template cloning + npm install + dev server starting - you can start coding now!',
-        urls: projectUrls
-      });
+        console.log(`[VibeKit] Git clone completed`);
+        
+        // Step 2: Install dependencies
+        console.log(`[VibeKit] Installing dependencies with Bun...`);
+        const installResult = await vibeKit.executeCommand(`cd ${projectDir} && /home/user/.bun/bin/bun install && /home/user/.bun/bin/bun add @expo/ngrok@4.1.0 --dev`, options);
+        if (installResult.exitCode !== 0) {
+          throw new Error(`Dependencies installation failed: ${installResult.stderr}`);
+        }
+        console.log(`[VibeKit] Dependencies installed`);
+        
+        // Step 3: Fix file watcher limit
+        console.log(`[VibeKit] Fixing file watcher limit...`);
+        const watcherResult = await vibeKit.executeCommand(`echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p`, options);
+        if (watcherResult.exitCode !== 0) {
+          console.warn(`[VibeKit] File watcher fix failed: ${watcherResult.stderr}`);
+        } else {
+          console.log(`[VibeKit] File watcher limit increased`);
+        }
+        
+        // Step 4: Start Expo server in development mode
+        console.log(`[VibeKit] Starting Expo development server...`);
+        const expoResult = await vibeKit.executeCommand(`cd ${projectDir} && export EXPO_TUNNEL_SUBDOMAIN=${projectDir} && /home/user/.bun/bin/bunx expo start --tunnel --port 3000`, { ...options, background: true });
+        console.log(`[VibeKit] Expo server started in background`);
+        
+        // Mark template setup as completed
+        sandbox.createExpoAppCompleted = true;
+        sandbox.createExpoAppResult = {
+          success: true,
+          urls: projectUrls
+        };
+        
+        // Return success immediately
+        res.json({
+          success: true,
+          output: 'Expo template setup completed successfully. Claude Code can now begin coding.',
+          stderr: '',
+          exitCode: 0,
+          sandboxId: sandbox.sandboxId,
+          message: 'Expo template setup completed - you can start coding now!',
+          urls: projectUrls
+        });
+        
+      } catch (error) {
+        console.error(`[VibeKit] Expo setup failed:`, error);
+        res.status(500).json({
+          success: false,
+          error: error.message,
+          sandboxId: sandbox.sandboxId
+        });
+      }
       
       return;
     }
@@ -504,9 +531,10 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
     
     // Note: npx expo start is now handled automatically as part of git clone template-expo command
     
-    // Special handling for npm install: start in background and return early
-    if (command.includes('npm install')) {
-      console.log(`[VibeKit] Detected npm install command - starting in background`);
+    // Special handling for bun install: start in background and return early
+    // BUT skip if this is part of template setup (already handled by git clone template-expo)
+    if (command.includes('bun install') && !sandbox.createExpoAppCompleted) {
+      console.log(`[VibeKit] Detected bun install command - starting in background`);
       
       // Start the command in background
       const backgroundPromise = vibeKit.executeCommand(command, { ...options, background: true });
@@ -514,22 +542,35 @@ app.post('/api/sandbox/execute-command', async (req, res) => {
       // Return success immediately
         res.json({
         success: true,
-        output: 'Dependencies installation started with npm in background. You can continue coding while packages install.',
+        output: 'Dependencies installation started with Bun in background. You can continue coding while packages install.',
         stderr: '',
         exitCode: 0,
           sandboxId: sandbox.sandboxId,
         background: true,
-        message: 'Dependencies installing with npm in background - you can continue coding!'
+        message: 'Dependencies installing with Bun in background - you can continue coding!'
       });
       
       // Continue the background process
       backgroundPromise.then(result => {
-        console.log(`[VibeKit] Background npm install completed:`, result);
+        console.log(`[VibeKit] Background bun install completed:`, result);
       }).catch(error => {
-        console.error(`[VibeKit] Background npm install failed:`, error);
+        console.error(`[VibeKit] Background bun install failed:`, error);
       });
       
       return;
+    }
+    
+    // Skip bun install if template setup is already completed
+    if (command.includes('bun install') && sandbox.createExpoAppCompleted) {
+      console.log(`[VibeKit] Skipping bun install - template setup already completed`);
+      return res.json({
+        success: true,
+        output: 'Dependencies already installed during template setup.',
+        stderr: '',
+        exitCode: 0,
+        sandboxId: sandbox.sandboxId,
+        message: 'Template setup already completed - dependencies installed!'
+      });
     }
     
     // For other commands, use normal timeout handling

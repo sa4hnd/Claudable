@@ -222,16 +222,47 @@ class ClaudeCodeSandboxCLI(BaseCLI):
                 created_at=datetime.utcnow()
             )
             
+            # Set up Bun PATH
+            await vibekit.execute_command("export PATH='$HOME/.bun/bin:$PATH'")
+            
+            # Add Bun to shell profiles for persistence
+            await vibekit.execute_command("echo 'export BUN_INSTALL=\"$HOME/.bun\"' >> ~/.bashrc")
+            await vibekit.execute_command("echo 'export PATH=\"$BUN_INSTALL/bin:$PATH\"' >> ~/.bashrc")
+            await vibekit.execute_command("echo 'export BUN_INSTALL=\"$HOME/.bun\"' >> ~/.zshrc")
+            await vibekit.execute_command("echo 'export PATH=\"$BUN_INSTALL/bin:$PATH\"' >> ~/.zshrc")
+            
+            # Verify Bun is accessible using full path (Bun is installed for user)
+            bun_check = await vibekit.execute_command("/home/user/.bun/bin/bun --version")
+            ui.info(f"Bun version check: {bun_check}", "Claude Sandbox")
+            
             # Clean up any existing directories
             await vibekit.execute_command("cd /vibe0 && rm -rf my-app*")
             
-            # Clone template repo and start dev server with npm
+            # Clone template repo and install dependencies with Bun
             project_dir = f"/vibe0/{app_name}"
-            chained_cmd = f"cd /vibe0 && git clone https://github.com/sa4hnd/template-expo.git {app_name} && cd {app_name} && npm install && npm install @expo/ngrok@4.1.0 --save-dev && export EXPO_TUNNEL_SUBDOMAIN={app_name} && npx expo start --tunnel --port 3000"
             
-            result = await vibekit.execute_command(chained_cmd)
+            # Step 1: Clone template
+            clone_cmd = f"cd /vibe0 && git clone https://github.com/sa4hnd/template-expo.git {app_name}"
+            result = await vibekit.execute_command(clone_cmd)
             if not result.get("success"):
-                raise Exception(f"Failed to create Expo project and start dev server: {result}")
+                raise Exception(f"Failed to clone Expo template: {result}")
+            
+            # Step 2: Install dependencies
+            install_cmd = f"cd {project_dir} && /home/user/.bun/bin/bun install && /home/user/.bun/bin/bun add @expo/ngrok@4.1.0 --dev"
+            result = await vibekit.execute_command(install_cmd)
+            if not result.get("success"):
+                raise Exception(f"Failed to install dependencies: {result}")
+            
+            # Step 3: Fix file watcher limit
+            watcher_cmd = "echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p"
+            result = await vibekit.execute_command(watcher_cmd)
+            if not result.get("success"):
+                ui.warning(f"File watcher fix failed: {result}", "Claude Sandbox")
+            
+            # Step 4: Start Expo server in development mode
+            expo_cmd = f"cd {project_dir} && export EXPO_TUNNEL_SUBDOMAIN={app_name} && /home/user/.bun/bin/bunx expo start --tunnel --port 3000"
+            # Start Expo in background so it doesn't block
+            await vibekit.execute_command(expo_cmd, {"background": True})
             
             # Show git setup status
             yield Message(
@@ -262,7 +293,7 @@ class ClaudeCodeSandboxCLI(BaseCLI):
             await vibekit.execute_command(f"cd {project_dir} && git commit -m 'Initial commit'")
             
             # Dev server is now started as part of the chained command above
-            ui.info("Expo development server started with npm and tunnel mode", "Claude Sandbox")
+            ui.info("Expo development server started with Bun and tunnel mode", "Claude Sandbox")
             
             # Get preview URLs (like your test script)
             host_url = await vibekit.get_host(3000)
